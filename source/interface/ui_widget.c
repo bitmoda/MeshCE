@@ -693,6 +693,8 @@ struct widget_instance;
 /* port: port/linux/game/menu_functions.c: a text's colour in place of its
 own (the server browser's pings) */
 boolean pc_menu_text_color(struct widget_instance *widget, real_argb_color *color);
+/* port: a bitmap's colour in place of white (the player card's emblem) */
+boolean pc_menu_bitmap_tint(struct widget_instance *widget, unsigned long *color);
 
 /* ---------- constants */
 
@@ -7518,6 +7520,75 @@ static void ui_debug_log_keyboard_tap(
 	return;
 }
 
+/* the main menu's rank chips. a click runs their accept handler and leaves
+the menu's focus where it was, so passing the pointer over them does not
+pull the highlight off the list */
+static boolean ui_mouse_is_card(
+	struct widget_instance *widget)
+{
+	char const *name = widget && widget->name ? widget->name : "";
+
+	return !strcmp(name, "rank_badge") || !strcmp(name, "rank_level") || !strcmp(name, "rank_plate");
+}
+
+static void ui_mouse_activate_card(
+	struct widget_instance *widget)
+{
+	struct ui_widget_definition *definition;
+	struct event_record event;
+	struct widget_instance *root;
+	struct widget_instance *focused;
+	struct widget_stack_node *history;
+	long parent_tag;
+	short child_index;
+	short stack;
+	long index;
+	boolean deleted;
+
+	if (!widget)
+		return;
+	definition = ui_widget_definition_get(widget->definition_tag_index);
+	if (!definition)
+		return;
+	/* the opened screen records the widget that opened it, and Back returns
+	there. A card click leaves the menu list on the row it already had. */
+	root = widget_instance_get_topmost_parent(widget);
+	focused = root ? root->focused_child : NULL;
+	parent_tag = NONE;
+	child_index = (short)NONE;
+	while (focused && focused->focused_child && !ui_mouse_is_card(focused->focused_child))
+		focused = focused->focused_child;
+	if (focused && focused->parent && !ui_mouse_is_card(focused))
+	{
+		parent_tag = focused->parent->definition_tag_index;
+		child_index = (short)widget_instance_get_child_index_from_parent(focused);
+	}
+	stack = (widget->local_player_index == NONE) ? 0 : widget->local_player_index;
+	history = (stack >= 0 && stack < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS) ?
+		widget_globals.widget_stack[stack] : NULL;
+	csmemset(&event, 0, sizeof(event));
+	event.controller_index = widget->local_player_index;
+	deleted = FALSE;
+	for (index = 0; index < definition->event_handlers.count && !deleted; index++)
+	{
+		struct ui_widget_event_handler_reference *handler;
+
+		handler = (struct ui_widget_event_handler_reference *)definition->event_handlers.address + index;
+		if (handler->event_type == _gamepad_analog_button_a)
+			event_handler_dispatch(widget, definition, &event, handler, &deleted);
+	}
+	if (parent_tag != NONE &&
+		stack >= 0 && stack < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS &&
+		widget_globals.widget_stack[stack] &&
+		widget_globals.widget_stack[stack] != history)
+	{
+		widget_globals.widget_stack[stack]->data.focused_child_parent_widget_tag = parent_tag;
+		widget_globals.widget_stack[stack]->data.focused_child_index = child_index;
+	}
+
+	return;
+}
+
 /* turns the pointer's motion, clicks and wheel since the last frame into the
 first player's controller events; while the virtual keyboard is up it gets
 the clicks and the menu behind gets nothing; a touch drag stops at the list's
@@ -7646,7 +7717,7 @@ static void ui_widgets_process_mouse(
 				case _ui_mouse_target_value:
 					/* a column title sorts on a click. passing over it
 					does not take the focus or play the cursor sound */
-					if (ui_mouse_is_sort_header(target->widget))
+					if (ui_mouse_is_sort_header(target->widget) || ui_mouse_is_card(target->widget))
 						break;
 					/* (a selection list's row is chosen by a click, not
 					by passing over it on the way to its buttons) */
@@ -7688,6 +7759,11 @@ static void ui_widgets_process_mouse(
 					if (ui_mouse_is_sort_header(target->widget))
 					{
 						ui_mouse_sort_header_click(target->widget);
+						break;
+					}
+					if (ui_mouse_is_card(target->widget))
+					{
+						ui_mouse_activate_card(target->widget);
 						break;
 					}
 					/* (a selection list's row: chosen by a click, used by
@@ -7929,6 +8005,12 @@ static void widget_instance_render_recursive(
 				alpha_modifier;
 		}
 		color = modulate_pixel32_by_real_alpha(0xFFFFFFFF, alpha);
+		{
+			unsigned long tint;
+
+			if (pc_menu_bitmap_tint(widget, &tint))
+				color = modulate_pixel32_by_real_alpha(tint, alpha);
+		}
 		{
 			/* port: a frame of ui.map's that the menus scale (the Xbox's
 			picture of the button settings, in the profile settings' smaller

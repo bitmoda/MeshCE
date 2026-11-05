@@ -76,6 +76,7 @@ machine (their datum identifiers need not be).
 #include "units/bipeds.h"
 #include "network_coop.h"
 #include "network_distributed.h"
+#include "rank_result.h"
 #include "hardcore_rules.h"
 #include "networking/network_server_manager.h"
 #include "network_voice.h"
@@ -3657,6 +3658,7 @@ static void distributed_send_game_state(
 	long size = game_engine_write_network_state(message.data, sizeof(message.data));
 	unsigned long checksum;
 
+	rank_match_report();
 	if (size <= 0)
 		return;
 	if (machine_index != NONE)

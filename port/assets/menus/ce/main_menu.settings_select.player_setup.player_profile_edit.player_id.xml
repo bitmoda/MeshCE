@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Player ID, in the settings screens' style. Left and right, and a click on either side of a value, change it. OK keeps it. Cancel puts the emblem back. -->
+<menus>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="bitmaps/gradient">
+		<data input="port rank id"/>
+		<on event="created" run="port rank open"/>
+		<on event="b" run="port rank cancel" back="true"/>
+		<on event="back" run="port rank cancel" back="true"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/header_player_id"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_list"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_shape_big"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_mark_big"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_shape_big" controller="1" left="296" top="210" width="48" height="48" bitmap="rank/shape_big">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_mark_big" controller="1" left="296" top="210" width="48" height="48" bitmap="rank/mark_big">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/header_player_id" controller="1" left="35" top="11" width="605" height="59" bitmap="main_menu/settings_select/player_setup/player_profile_edit/player_id/header_player_id">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_help" type="text" controller="1" left="68" top="364" width="482" height="60" font="ui\large_ui" color="#FFFFFFFF" text="Foreground. 1 of 8.">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_list" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_children" description="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_help">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_fg" x="54" y="73"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_bg" x="54" y="93"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cfg" x="54" y="113"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cbg" x="54" y="133"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_core" x="54" y="153"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_buttons" y="414"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_buttons" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<data input="common button bar update"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_ok" x="406" y="1"/>
+		<child widget="common_button_cancel" x="510" y="1"/>
+		<on event="right_trigger" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_ok" type="text" width="96" height="20" bitmap="bitmaps/text_button_background" string_list="strings/common_button_captions" string_index="1" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="1">
+		<on event="a" run="port rank save" back="true"/>
+		<on event="start" run="port rank save" back="true"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_fg" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_fg_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_fg_spin" x="320" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_fg_label" type="text" controller="1" width="300" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/player_id/labels" string_index="0" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_fg_spin" type="spinner" left="3" top="0" width="147" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="Sword|Dog tags|Helmet|Bullet|Ring|Wings|Mark|Crest" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 150 15 156">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_bg" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_bg_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_bg_spin" x="320" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_bg_label" type="text" controller="1" width="300" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/player_id/labels" string_index="1" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_bg_spin" type="spinner" left="3" top="0" width="147" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="Circle|Diamond|Square|Triangle|Star|Plus|Shield|Bar" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 150 15 156">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cfg" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cfg_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cfg_spin" x="320" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cfg_label" type="text" controller="1" width="300" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/player_id/labels" string_index="2" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cfg_spin" type="spinner" left="3" top="0" width="147" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/player_setup/player_profile_edit/color_edit/colors_list" list_flags="items_from_strings" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 150 15 156">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cbg" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cbg_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cbg_spin" x="320" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cbg_label" type="text" controller="1" width="300" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/player_id/labels" string_index="3" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_cbg_spin" type="spinner" left="3" top="0" width="147" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/player_setup/player_profile_edit/color_edit/colors_list" list_flags="items_from_strings" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 150 15 156">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_core" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_core_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_core_value" x="320" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_core_label" type="text" controller="1" width="300" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/player_id/labels" string_index="4" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id/rank_core_value" type="text" controller="1" width="147" height="18" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" text="pending">
+	</widget>
+	<strings name="main_menu/settings_select/player_setup/player_profile_edit/player_id/labels">
+		<string text="FOREGROUND:"/>
+		<string text="BACKGROUND:"/>
+		<string text="SPRITE COLOR:"/>
+		<string text="SHAPE COLOR:"/>
+		<string text="CORE ID:"/>
+	</strings>
+</menus>

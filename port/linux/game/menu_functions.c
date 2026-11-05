@@ -107,6 +107,7 @@ their handlers open opens.
 /* (internet play's server browser: the platform layer's) */
 #include "../src/p2p.h"
 #include "../src/matchmaking.h"
+#include "../src/rank_account.h"
 #include "text_filter.h"
 
 #include <stdio.h>
@@ -116,6 +117,7 @@ their handlers open opens.
 
 /* the platform layer's (port/linux/src) */
 void platform_log(char const *format, ...);
+long halo_screen_width(void);
 void platform_request_quit(void);
 char const *pc_menu_function_name(long function_index);
 char const *pc_menu_game_data_input_name(long function_index);
@@ -1231,6 +1233,7 @@ static int profile_menu_machine = 1;
 
 static struct widget_instance *named(struct widget_instance *widget, char const *name, long nth);
 static void visible_set(struct widget_instance *widget, boolean visible);
+static void label_set(struct widget_instance *label, wchar_t const *text);
 
 /* "port profile rows": show one set, packed from the top. a game's pause
 menu settings drops the profile name and Gamepads (Controls Setup has
@@ -1250,6 +1253,64 @@ static int profile_row_named(char const *const *names, short count, char const *
 	return 0;
 }
 
+/* the description strings and pictures are the rows from before Player ID.
+that row has its own line, and the rows after it keep the picture they had */
+static short profile_description_index(char const *name)
+{
+	if (!name)
+		return NONE;
+	if (!strcmp(name, "name_profile_item"))
+		return 0;
+	if (!strcmp(name, "controller_setup_profile_item"))
+		return 1;
+	if (!strcmp(name, "gamepads_profile_item"))
+		return 2;
+	if (!strcmp(name, "mouse_settings_profile_item"))
+		return 3;
+	if (!strcmp(name, "audio_settings_profile_item"))
+		return 4;
+	if (!strcmp(name, "video_settings_profile_item"))
+		return 5;
+	if (!strcmp(name, "network_settings_profile_item"))
+		return 6;
+	if (!strcmp(name, "color_profile_item"))
+		return 7;
+	if (!strcmp(name, "about_item"))
+		return 8;
+	/* Mods sits before About. Its card is the profile list's own index, not
+	its place among the children. */
+	if (!strcmp(name, "mods_profile_item"))
+		return 9;
+	return NONE;
+}
+
+static void profile_description_fix(struct widget_instance *list)
+{
+	struct widget_instance *text;
+	struct widget_instance *picture;
+	short index;
+
+	if (!list || !list->focused_child || list->focused_child->type != 1 || !list->focused_child->name)
+		return;
+	if (!list->parameters.list.extended_description || !list->parameters.list.extended_description->child ||
+		!list->parameters.list.extended_description->child->next)
+		return;
+	text = list->parameters.list.extended_description->child;
+	picture = text->next;
+	if (!strcmp(list->focused_child->name, "player_id_profile_item"))
+	{
+		label_set(text, L"Emblem, colors, and Core ID.");
+		visible_set(picture, FALSE);
+		return;
+	}
+	index = profile_description_index(list->focused_child->name);
+	if (index == NONE)
+		return;
+	visible_set(picture, TRUE);
+	text->parameters.text_box.string_list_index = index;
+	picture->animation.current_frame_index = index;
+}
+
 static void profile_rows_apply(struct widget_instance *list)
 {
 	static char const *const machine[] =
@@ -1259,7 +1320,7 @@ static void profile_rows_apply(struct widget_instance *list)
 	};
 	static char const *const profile[] =
 	{
-		"name_profile_item", "gamepads_profile_item", "color_profile_item"
+		"name_profile_item", "player_id_profile_item", "gamepads_profile_item", "color_profile_item"
 	};
 	char const *const *show = profile_menu_machine ? machine : profile;
 	short show_count = profile_menu_machine ? (short)NUMBEROF(machine) : (short)NUMBEROF(profile);
@@ -1324,27 +1385,7 @@ static void profile_rows_apply(struct widget_instance *list)
 			}
 		}
 	}
-	/* Mods is placed before About, so About stays the last row. Their
-	descriptions and pictures are the profile list's own indexes (8 About,
-	9 Mods: its card is that frame), not their places among the children.
-	The list's own update has already set those from the place. */
-	if (list->focused_child && list->focused_child->name && list->parameters.list.extended_description)
-	{
-		short description = NONE;
-		struct widget_instance *text;
-
-		if (!strcmp(list->focused_child->name, "about_item"))
-			description = 8;
-		else if (!strcmp(list->focused_child->name, "mods_profile_item"))
-			description = 9;
-		text = list->parameters.list.extended_description->child;
-		if (description != NONE && text)
-		{
-			text->parameters.text_box.string_list_index = description;
-			if (text->next)
-				text->next->animation.current_frame_index = description;
-		}
-	}
+	profile_description_fix(list);
 }
 
 boolean network_game_is_active(void);
@@ -5567,6 +5608,457 @@ static short browser_row_index(struct widget_instance *row)
 	return row && !strncmp(row->name, "server_item_", 12) ? (short)(atoi(row->name + 12) - 1) : NONE;
 }
 
+/* ---------- ranking: the main menu card and Player ID */
+
+static int rank_editing;
+static struct rank_account rank_saved;
+
+static void rank_ascii_name(char *out, int size, wchar_t const *name)
+{
+	int index = 0;
+
+	if (!out || size < 1)
+		return;
+	if (!name)
+		name = L"";
+	while (name[index] && index < size - 1 && index < 11)
+	{
+		out[index] = name[index] >= 32 && name[index] < 127 ? (char)name[index] : '?';
+		index++;
+	}
+	out[index] = 0;
+}
+
+static void rank_wtext(wchar_t *out, int size, char const *text)
+{
+	int index = 0;
+
+	if (!out || size < 1)
+		return;
+	if (!text)
+		text = "";
+	while (text[index] && index < size - 1)
+	{
+		out[index] = (unsigned char)text[index] < 128 ? (wchar_t)(unsigned char)text[index] : (wchar_t)'?';
+		index++;
+	}
+	out[index] = 0;
+}
+
+static void rank_bind_index(long index)
+{
+	char path[256];
+	struct player_profile profile;
+	char name[12];
+
+	if (index == NONE)
+		return;
+	if (!player_profile_get_enclosing_directory_path(index, path))
+		return;
+	if (!player_profile_get(index, &profile))
+		return;
+	rank_ascii_name(name, (int)sizeof(name), profile.player_name);
+	rank_account_bind(path, name);
+}
+
+static void rank_bind_shown(void)
+{
+	long index;
+
+	index = player_ui_get_active_player_profile_index(0);
+	if (index == NONE)
+		index = player_ui_get_player1_last_used_profile_index();
+	rank_bind_index(index);
+}
+
+static void rank_bind_edit(void)
+{
+	rank_bind_index(player_ui_get_edit_profile_index());
+}
+
+static void rank_party_fill_now(void)
+{
+	short local;
+	int added;
+
+	rank_party_begin();
+	added = 0;
+	for (local = 0; local < 4; local++)
+	{
+		char path[256];
+		struct player_profile profile;
+		char name[12];
+
+		if (!player_ui_get_path_to_local_player_profile_directory(local, path))
+			continue;
+		player_ui_get_active_player_profile(local, &profile);
+		rank_ascii_name(name, (int)sizeof(name), profile.player_name);
+		if (!name[0])
+			continue;
+		rank_party_add(path, name);
+		added++;
+	}
+	if (!added)
+	{
+		long index;
+		char path[256];
+		struct player_profile profile;
+		char name[12];
+
+		index = player_ui_get_active_player_profile_index(0);
+		if (index == NONE)
+			index = player_ui_get_player1_last_used_profile_index();
+		if (index != NONE && player_profile_get(index, &profile) &&
+			player_profile_get_enclosing_directory_path(index, path))
+		{
+			rank_ascii_name(name, (int)sizeof(name), profile.player_name);
+			if (name[0])
+				rank_party_add(path, name);
+		}
+	}
+	if (config_boolean("network.online"))
+		rank_register_kick();
+}
+
+static void rank_party_fill(void)
+{
+	static unsigned long filled_at;
+	unsigned long now;
+
+	now = system_milliseconds();
+	if (filled_at && now - filled_at < 1000)
+		return;
+	filled_at = now;
+	rank_party_fill_now();
+}
+
+static void rank_color_label(short index, wchar_t *text)
+{
+	text[0] = 0;
+	if (index < 0)
+		index = 0;
+	if (index >= COLOR_COUNT)
+		index = (short)(COLOR_COUNT - 1);
+	string_get("pc\\main_menu\\settings_select\\player_setup\\player_profile_edit\\color_edit\\colors_list",
+		index, text);
+	if (!text[0])
+	{
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Color %d", index + 1);
+		text[ROW_TEXT_LENGTH - 1] = 0;
+	}
+}
+
+static boolean rank_step(struct widget_instance *widget, int delta)
+{
+	char const *name = widget && widget->name ? widget->name : "";
+
+	if (!strcmp(name, "rank_fg"))
+		rank_emblem_step(0, delta);
+	else if (!strcmp(name, "rank_bg"))
+		rank_emblem_step(1, delta);
+	else if (!strcmp(name, "rank_cfg"))
+		rank_emblem_step(2, delta);
+	else if (!strcmp(name, "rank_cbg"))
+		rank_emblem_step(3, delta);
+	else if (!strcmp(name, "rank_core"))
+		return TRUE;
+	else
+		return FALSE;
+	return TRUE;
+}
+
+/* the main menu's name chip opened Player ID, so leaving it ends the edit */
+static int rank_from_card;
+
+/* "port rank card edit": the name on the main menu opens Player ID */
+static boolean rank_card_edit(void)
+{
+	if (!pc_menu_profile_edit_begin())
+		return FALSE;
+	rank_from_card = 1;
+	return TRUE;
+}
+
+/* the choice each spinner was showing. -1 until Player ID has put the
+emblem there, so opening the screen does not take the spinner's first item */
+static short rank_spin_shown[4] = { -1, -1, -1, -1 };
+
+static void rank_spin_clear(void)
+{
+	int field;
+
+	for (field = 0; field < 4; field++)
+		rank_spin_shown[field] = -1;
+}
+
+/* the row's spinner shows the emblem until the player moves it */
+static void rank_spinner_take(struct widget_instance *screen, char const *name, int field, int value, int count)
+{
+	struct widget_instance *spinner = named(screen, name, 0);
+	short index;
+
+	if (!spinner || count < 1 || spinner->parameters.list.number_of_items < 1)
+		return;
+	if (value < 0)
+		value = 0;
+	if (value >= count)
+		value = count - 1;
+	index = spinner->parameters.list.selected_index;
+	if (rank_spin_shown[field] < 0 || index < 0 || index >= count || index == rank_spin_shown[field])
+	{
+		spinner->parameters.list.selected_index = (short)value;
+		rank_spin_shown[field] = (short)value;
+	}
+	else
+	{
+		rank_emblem_set(field, index);
+		rank_spin_shown[field] = index;
+	}
+}
+
+static boolean rank_open_screen(struct widget_instance *widget)
+{
+	(void)widget;
+	rank_spin_clear();
+	rank_bind_edit();
+	rank_account_get(&rank_saved);
+	rank_editing = 1;
+	if (config_boolean("network.online"))
+	{
+		matchmaking_watch();
+		rank_register_kick();
+	}
+	return TRUE;
+}
+
+static boolean rank_save_screen(void)
+{
+	rank_account_commit();
+	rank_editing = 0;
+	if (rank_from_card)
+	{
+		rank_from_card = 0;
+		player_ui_end_editing_profile();
+	}
+	return TRUE;
+}
+
+static boolean rank_cancel_screen(void)
+{
+	if (rank_editing)
+		rank_account_restore(&rank_saved);
+	rank_editing = 0;
+	if (rank_from_card)
+	{
+		rank_from_card = 0;
+		player_ui_end_editing_profile();
+	}
+	return TRUE;
+}
+
+/* the emblem drawn on the card and on Player ID. frames are the eight named pictures */
+static void rank_emblem_frame(struct widget_instance *root, char const *name, int frame)
+{
+	struct widget_instance *widget;
+
+	widget = named(root, name, 0);
+	if (!widget)
+		return;
+	if (frame < 0)
+		frame = 0;
+	if (frame > 7)
+		frame = 7;
+	widget->animation.current_frame_index = (short)frame;
+}
+
+static void rank_emblem_show(struct widget_instance *root, struct rank_account const *account)
+{
+	rank_emblem_frame(root, "rank_shape", account->background);
+	rank_emblem_frame(root, "rank_mark", account->foreground);
+	rank_emblem_frame(root, "rank_shape_big", account->background);
+	rank_emblem_frame(root, "rank_mark_big", account->foreground);
+}
+
+/* how wide small_ui draws this text */
+static short rank_text_width(wchar_t const *text)
+{
+	static real_argb_color const white = { 1.0f, 1.0f, 1.0f, 1.0f };
+	rectangle2d bounds;
+	rectangle2d ink;
+	rectangle2d cursor;
+	long font;
+
+	if (!text || !text[0])
+		return 0;
+	font = tag_loaded('font', "ui\\small_ui");
+	if (font == NONE)
+		return 40;
+	bounds.x0 = 0;
+	bounds.y0 = 0;
+	bounds.x1 = 0x3FFF;
+	bounds.y1 = 40;
+	draw_string_set_draw_mode(font, NONE, 0, 0, &white);
+	draw_unicode_string_compute_bounds(&bounds, text, &ink, &cursor);
+	return (short)(MAX(ink.x1, cursor.x0) - bounds.x0);
+}
+
+static void rank_box_width(struct widget_instance *widget, short width)
+{
+	struct ui_widget_definition *definition;
+
+	if (width < 16)
+		width = 16;
+	definition = ui_widget_definition_get(widget->definition_tag_index);
+	if (!definition)
+		return;
+	definition->bounds.x1 = (short)(definition->bounds.x0 + width);
+}
+
+/* the insignia, the level, the emblem and the name, one row, ending at the
+screen's right. The menus are the middle 640 columns, so the row's right
+edge is that plus the margin on the right. The insignia is one size. The
+level and the name are as wide as their text, so they sit against it. */
+static void rank_card_place(struct widget_instance *screen)
+{
+	struct widget_instance *badge;
+	struct widget_instance *level;
+	struct widget_instance *plate;
+	struct widget_instance *shape;
+	struct widget_instance *mark;
+	long width;
+	long right;
+	short badge_w;
+	short level_w;
+	short plate_w;
+
+	badge = named(screen, "rank_badge", 0);
+	level = named(screen, "rank_level", 0);
+	plate = named(screen, "rank_plate", 0);
+	if (!badge || !level || !plate)
+		return;
+	width = halo_screen_width();
+	if (width < 640)
+		width = 640;
+	right = (width + 640) / 2 - 8;
+	badge_w = 18;
+	level_w = (short)(rank_text_width(level->parameters.text_box.text) + 8);
+	/* icon, a small gap, the name, and a little room at the right of the name */
+	plate_w = (short)(4 + 18 + 3 + rank_text_width(plate->parameters.text_box.text) + 4);
+	rank_box_width(level, level_w);
+	rank_box_width(plate, plate_w);
+	plate->horizontal_offset = (short)(right - plate_w);
+	plate->vertical_offset = 6;
+	level->horizontal_offset = (short)(plate->horizontal_offset - 2 - level_w);
+	level->vertical_offset = 6;
+	badge->horizontal_offset = (short)(level->horizontal_offset - 2 - badge_w);
+	badge->vertical_offset = 7;
+	shape = named(plate, "rank_shape", 0);
+	mark = named(plate, "rank_mark", 0);
+	if (shape)
+	{
+		shape->horizontal_offset = 3;
+		shape->vertical_offset = 1;
+	}
+	if (mark)
+	{
+		mark->horizontal_offset = 3;
+		mark->vertical_offset = 1;
+	}
+}
+
+static void rank_card_update(struct widget_instance *screen)
+{
+	struct rank_account account;
+	wchar_t text[ROW_TEXT_LENGTH];
+	char line[96];
+
+	rank_bind_shown();
+	if (config_boolean("network.online"))
+	{
+		matchmaking_watch();
+		rank_register_kick();
+	}
+	rank_account_get(&account);
+	rank_emblem_show(screen, &account);
+	rank_emblem_frame(screen, "rank_badge", rank_badge_index(account.games));
+	usnprintf(text, ROW_TEXT_LENGTH - 1, L"%d", account.level);
+	text[ROW_TEXT_LENGTH - 1] = 0;
+	label_set(named(screen, "rank_level", 0), text);
+	if (account.core[0])
+		snprintf(line, sizeof(line), "%s  %s", account.name[0] ? account.name : "Player", account.core);
+	else
+		snprintf(line, sizeof(line), "%s", account.name[0] ? account.name : "Player");
+	rank_wtext(text, ROW_TEXT_LENGTH, line);
+	label_set(named(screen, "rank_plate", 0), text);
+	rank_card_place(screen);
+}
+
+static void rank_id_update(struct widget_instance *screen)
+{
+	struct rank_account account;
+	struct widget_instance *list;
+	struct widget_instance *desc;
+	struct widget_instance *focus;
+	wchar_t text[ROW_TEXT_LENGTH];
+	char const *focus_name;
+	int count;
+	int index;
+
+	if (!rank_editing)
+		rank_bind_edit();
+	if (config_boolean("network.online"))
+	{
+		matchmaking_watch();
+		rank_register_kick();
+	}
+	rank_account_get(&account);
+	rank_spinner_take(screen, "rank_fg_spin", 0, account.foreground, rank_foreground_count());
+	rank_spinner_take(screen, "rank_bg_spin", 1, account.background, rank_background_count());
+	rank_spinner_take(screen, "rank_cfg_spin", 2, account.foreground_color, rank_color_count());
+	rank_spinner_take(screen, "rank_cbg_spin", 3, account.background_color, rank_color_count());
+	rank_account_get(&account);
+	rank_emblem_show(screen, &account);
+	list = named(screen, "player_id_list", 0);
+	desc = list ? list->parameters.list.extended_description : NULL;
+	if (account.core[0])
+		rank_wtext(text, ROW_TEXT_LENGTH, account.core);
+	else
+		rank_wtext(text, ROW_TEXT_LENGTH, "pending");
+	label_set(named(screen, "rank_core_value", 0), text);
+	focus = list ? list->focused_child : NULL;
+	focus_name = focus && focus->name ? focus->name : "";
+	if (!strcmp(focus_name, "rank_fg"))
+	{
+		count = rank_foreground_count();
+		index = account.foreground + 1;
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Foreground. %d of %d.", index, count);
+	}
+	else if (!strcmp(focus_name, "rank_bg"))
+	{
+		count = rank_background_count();
+		index = account.background + 1;
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Background. %d of %d.", index, count);
+	}
+	else if (!strcmp(focus_name, "rank_cfg"))
+	{
+		count = rank_color_count();
+		index = account.foreground_color + 1;
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Sprite color. %d of %d.", index, count);
+	}
+	else if (!strcmp(focus_name, "rank_cbg"))
+	{
+		count = rank_color_count();
+		index = account.background_color + 1;
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Shape color. %d of %d.", index, count);
+	}
+	else if (!strcmp(focus_name, "rank_core"))
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Core ID is assigned by the server.");
+	else
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"OK keeps this emblem. Cancel puts it back.");
+	text[ROW_TEXT_LENGTH - 1] = 0;
+	label_set(desc, text);
+}
+
 /* the ping each row shows (-1: none), coloured by pc_menu_text_color: green
 under PING_GOOD milliseconds, yellow under PING_FAIR, red above */
 static short browser_row_pings[BROWSER_ROWS];
@@ -5581,12 +6073,56 @@ enum
 
 /* ui_widget.c: a text's colour in place of its own (FALSE: its own): a
 server browser row's ping by how good it is */
+/* ui_widget.c: the emblem pictures are white, and this is the color they take */
+boolean pc_menu_bitmap_tint(struct widget_instance *widget, unsigned long *color)
+{
+	struct rank_account account;
+	char const *name;
+	int shape;
+	int index;
+	real_rgb_color rgb;
+	int red;
+	int green;
+	int blue;
+
+	name = widget && widget->name ? widget->name : "";
+	shape = !strcmp(name, "rank_shape") || !strcmp(name, "rank_shape_big");
+	if (!shape && strcmp(name, "rank_mark") && strcmp(name, "rank_mark_big"))
+		return FALSE;
+	rank_account_get(&account);
+	index = shape ? account.background_color : account.foreground_color;
+	rgb = player_profile_get_rgb_color(index);
+	red = (int)(rgb.red * 255.0f);
+	green = (int)(rgb.green * 255.0f);
+	blue = (int)(rgb.blue * 255.0f);
+	/* black would disappear on the menu. iron still reads as the dark color */
+	if (red + green + blue < 24)
+	{
+		red = 0x6E;
+		green = 0x6E;
+		blue = 0x6E;
+	}
+	*color = 0xFF000000UL | ((unsigned long)red << 16) | ((unsigned long)green << 8) | (unsigned long)blue;
+	return TRUE;
+}
+
 boolean pc_menu_text_color(struct widget_instance *widget, real_argb_color *color)
 {
 	short row = widget->parent ? browser_row_index(widget->parent) : NONE;
 	short ping;
 	unsigned long rgba;
 
+	if (widget->name && !strcmp(widget->name, "rank_level"))
+	{
+		struct rank_account account;
+
+		rank_account_get(&account);
+		rgba = rank_level_rgba(account.level);
+		color->red = (real)((rgba >> 16) & 0xFF) / 255.0f;
+		color->green = (real)((rgba >> 8) & 0xFF) / 255.0f;
+		color->blue = (real)(rgba & 0xFF) / 255.0f;
+		return TRUE;
+	}
 	if (row < 0 || row >= BROWSER_ROWS || strcmp(widget->name, "server_item_ping"))
 		return FALSE;
 	ping = browser_row_pings[row];
@@ -8268,6 +8804,15 @@ static boolean lobby_kick(void)
 	player = lobby_action_find();
 	if (!lobby_action_kickable(player))
 		return TRUE;
+	{
+		char ascii[12];
+		char account[48];
+
+		rank_ascii_name(ascii, (int)sizeof(ascii), player->name);
+		rank_account_for_name(ascii, account, (int)sizeof(account));
+		if (account[0])
+			rank_kick_add(account);
+	}
 	if (bot_controller_is_bot(player->machine_index, player->controller_index))
 	{
 		client = global_network_game_client_get();
@@ -8339,6 +8884,10 @@ static void lobby_row_text(short row, wchar_t *text)
 	struct network_player *player = lobby_players[multiplayer.lobby_first + row];
 	struct network_game *game = network_game_client_get_game(global_network_game_client_get());
 	wchar_t name[NUMBEROF(player->name) + 1];
+	char ascii[12];
+	int ascii_index;
+	int level;
+	size_t length;
 
 	ustrncpy(name, player->name, NUMBEROF(player->name));
 	name[NUMBEROF(player->name)] = 0;
@@ -8352,10 +8901,22 @@ static void lobby_row_text(short row, wchar_t *text)
 		player->controller_index >= 0 && player->controller_index < MAXIMUM_LOCAL_PLAYERS &&
 		!bot_controller_is_bot(player->machine_index, player->controller_index))
 	{
-		size_t length = ustrlen(text);
-
+		length = ustrlen(text);
 		usnprintf(text + length, ROW_TEXT_LENGTH - 1 - length, L"  [P%d]", player->controller_index + 1);
 	}
+	ascii_index = 0;
+	while (ascii_index < 11 && name[ascii_index])
+	{
+		ascii[ascii_index] = name[ascii_index] >= 32 && name[ascii_index] < 127 ? (char)name[ascii_index] : '?';
+		ascii_index++;
+	}
+	ascii[ascii_index] = 0;
+	level = matchmaking_card_level(ascii);
+	if (level < 0)
+		level = rank_level_named(ascii);
+	length = ustrlen(text);
+	if (level >= 0 && length + 6 < ROW_TEXT_LENGTH)
+		usnprintf(text + length, ROW_TEXT_LENGTH - 1 - length, L"  %d", level);
 	text[ROW_TEXT_LENGTH - 1] = 0;
 }
 
@@ -8420,6 +8981,36 @@ voice chat (or muted) has a speaker just left of their name
 void menu_functions_text_box_drawn(struct widget_instance *widget, rectangle2d const *bounds)
 {
 	short row;
+
+	/* the emblem sits just left of the name, which is drawn at the right of its row */
+	if (widget->name && !strcmp(widget->name, "rank_plate"))
+	{
+		struct widget_instance *shape = named(widget, "rank_shape", 0);
+		struct widget_instance *mark = named(widget, "rank_mark", 0);
+		short x = 124;
+
+		if (widget->parameters.text_box.text && widget->parameters.text_box.text[0])
+		{
+			rectangle2d text;
+			rectangle2d cursor;
+
+			draw_unicode_string_compute_bounds(bounds, widget->parameters.text_box.text, &text, &cursor);
+			x = (short)(text.x0 - bounds->x0 - 20);
+			if (x < 0)
+				x = 0;
+		}
+		if (shape)
+		{
+			shape->horizontal_offset = x;
+			shape->vertical_offset = 1;
+		}
+		if (mark)
+		{
+			mark->horizontal_offset = x;
+			mark->vertical_offset = 1;
+		}
+		return;
+	}
 
 	/* (the Mods screen's texts: the fonts and widths their lines are
 	measured in, mods_text_fits) */
@@ -8617,6 +9208,9 @@ static void lobby_update(struct widget_instance *list)
 	int party = matchmaking_queue_active();
 	int show_paste = mm_lobby_is_party();
 
+	if (party)
+		rank_party_fill();
+
 	/* a link pasted here leaves this party and joins that lobby. the screen
 	goes away with that join. */
 	mm_remember_host_invite();
@@ -8749,7 +9343,9 @@ static void lobby_update(struct widget_instance *list)
 			int name;
 			size_t length;
 
-			if (!matchmaking_is_ready() || offer.phase == MATCHMAKING_PHASE_PARTY)
+			if (rank_search_blocks())
+				usnprintf(status, NUMBEROF(status) - 1, L"Core ID is still arriving.");
+			else if (!matchmaking_is_ready() || offer.phase == MATCHMAKING_PHASE_PARTY)
 				usnprintf(status, NUMBEROF(status) - 1, L"Find Game when ready");
 			else if (offer.wait_seconds > 0)
 				usnprintf(status, NUMBEROF(status) - 1, L"Looking: %d", offer.wait_seconds);
@@ -8764,12 +9360,19 @@ static void lobby_update(struct widget_instance *list)
 			for (name = 0; name < offer.name_count; name++)
 			{
 				wchar_t who[MATCHMAKING_LOBBY_NAME_LENGTH];
+				int level;
 
 				length = ustrlen(text);
 				if (length + 4 >= NUMBEROF(text))
 					break;
 				mm_ascii(who, NUMBEROF(who), offer.names[name]);
-				usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s", who);
+				level = matchmaking_card_level(offer.names[name]);
+				if (level < 0)
+					level = rank_level_named(offer.names[name]);
+				if (level >= 0)
+					usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s %d", who, level);
+				else
+					usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s", who);
 				text[NUMBEROF(text) - 1] = 0;
 			}
 		}
@@ -8778,6 +9381,7 @@ static void lobby_update(struct widget_instance *list)
 			usnprintf(text, NUMBEROF(text) - 1, L"%s\r\n%s\r\n%d of %d players\r\n\r\n%s", gametype,
 				engine_names[PIN(game->variant.game_engine_index, 0, 5)], lobby_player_count, game->maximum_players,
 				seconds > 0 ? L"Starting in:" : party && matchmaking_is_ready() ? L"Looking for a match" :
+				party && rank_search_blocks() ? L"Core ID is still arriving." :
 				party ? L"Find Game when ready" : game->machine_count < 2 ? L"Waiting for players" : L"");
 			text[NUMBEROF(text) - 1] = 0;
 			if (seconds > 0)
@@ -11186,11 +11790,21 @@ static void mm_lobby_text(wchar_t *text, int size)
 	for (index = 0; index < mm_menu.name_count; index++)
 	{
 		wchar_t name[MATCHMAKING_LOBBY_NAME_LENGTH];
+		int level;
 
 		if (index)
 			mm_text_add(text, size, &used, L"\n");
 		mm_ascii(name, NUMBEROF(name), mm_menu.names[index]);
 		mm_text_add(text, size, &used, name);
+		level = matchmaking_card_level(mm_menu.names[index]);
+		if (level < 0)
+			level = rank_level_named(mm_menu.names[index]);
+		if (level >= 0)
+		{
+			usnprintf(line, NUMBEROF(line) - 1, L" %d", level);
+			line[NUMBEROF(line) - 1] = 0;
+			mm_text_add(text, size, &used, line);
+		}
 	}
 }
 
@@ -11777,6 +12391,8 @@ static void mm_paste_restore(struct widget_instance *widget)
 	}
 	if (!found)
 		return;
+	rank_party_fill_now();
+	rank_search_set(row.ranked);
 	mm_gamertag(name, (int)sizeof(name));
 	matchmaking_queue(playlist, name);
 	if (!matchmaking_queue_active())
@@ -12193,6 +12809,8 @@ static boolean mm_choose(struct widget_instance *widget, struct event_record *ev
 	}
 	if (!playlist || !playlist[0])
 		return FALSE;
+	rank_party_fill_now();
+	rank_search_set(row->ranked);
 	mm_gamertag(name, sizeof(name));
 	mm_menu.invited = 0;
 	mm_menu.waiting = 0;
@@ -12891,6 +13509,30 @@ boolean pc_menu_event_function_invoke(
 			clips_menu_keep_adjust(1);
 			return TRUE;
 		}
+		else if (!strcmp(name, "port rank open"))
+		{
+			return rank_open_screen(widget);
+		}
+		else if (!strcmp(name, "port rank next"))
+		{
+			return rank_step(widget, 1);
+		}
+		else if (!strcmp(name, "port rank previous"))
+		{
+			return rank_step(widget, -1);
+		}
+		else if (!strcmp(name, "port rank save"))
+		{
+			return rank_save_screen();
+		}
+		else if (!strcmp(name, "port rank cancel"))
+		{
+			return rank_cancel_screen();
+		}
+		else if (!strcmp(name, "port rank card edit"))
+		{
+			return rank_card_edit();
+		}
 		else if (!strcmp(name, "port hardcore start"))
 		{
 			return hardcore_start(widget);
@@ -13292,4 +13934,8 @@ void pc_menu_game_data_function_invoke(
 		mm_update(widget);
 	else if (!strcmp(name, "port clips list"))
 		clips_list_update(widget);
+	else if (!strcmp(name, "port rank card"))
+		rank_card_update(widget);
+	else if (!strcmp(name, "port rank id"))
+		rank_id_update(widget);
 }

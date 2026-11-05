@@ -7,12 +7,40 @@
 	</widget>
 	<widget name="main_menu/halo_logo" controller="1" width="640" height="256" bitmap="ui\shell\main_menu\halo_logo">
 	</widget>
+	<widget name="main_menu/main_menu/rank_badge" controller="1" width="18" height="18" bitmap="rank/service">
+		<on event="a" run="new game if no plyr profiles" open="main_menu/multiplayer_type_select/matchmaking/mm_screen" branch="true"/>
+		<on event="start" run="new game if no plyr profiles" open="main_menu/multiplayer_type_select/matchmaking/mm_screen" branch="true"/>
+		<conditional widget="main_menu/profile_manager/multiplayer_creating_profile" if_failed="true"/>
+	</widget>
+	<widget name="main_menu/main_menu/rank_level" type="text" controller="1" width="36" height="20" bitmap="bitmaps/option_bkds_join_field" font="ui\small_ui" color="#FFFFFFFF" align="right" text_y="1" text="0">
+		<on event="a" run="new game if no plyr profiles" open="main_menu/multiplayer_type_select/matchmaking/mm_screen" branch="true"/>
+		<on event="start" run="new game if no plyr profiles" open="main_menu/multiplayer_type_select/matchmaking/mm_screen" branch="true"/>
+		<conditional widget="main_menu/profile_manager/multiplayer_creating_profile" if_failed="true"/>
+	</widget>
+	<widget name="main_menu/main_menu/rank_shape" width="18" height="18" bitmap="rank/shape">
+	</widget>
+	<widget name="main_menu/main_menu/rank_mark" width="18" height="18" bitmap="rank/mark">
+	</widget>
+	<widget name="main_menu/main_menu/rank_plate" type="text" controller="1" width="144" height="20" bitmap="bitmaps/option_bkds_join_field" font="ui\small_ui" color="#FF2896FF" align="right" text_y="1" text="">
+		<on event="a" run="port rank card edit" open="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_screen" branch="true"/>
+		<on event="start" run="port rank card edit" open="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_screen" branch="true"/>
+		<conditional widget="main_menu/profile_manager/pm_entry_creating_profile" if_failed="true"/>
+		<child widget="main_menu/main_menu/rank_shape" x="1" y="1"/>
+		<child widget="main_menu/main_menu/rank_mark" x="1" y="1"/>
+	</widget>
+	<widget name="main_menu/main_menu/rank_card" type="column_list" width="640" height="32" flags="pass_unhandled_to_focused_child">
+		<child widget="main_menu/main_menu/rank_badge" x="476" y="6"/>
+		<child widget="main_menu/main_menu/rank_level" x="556" y="6"/>
+		<child widget="main_menu/main_menu/rank_plate" x="594" y="6"/>
+	</widget>
 	<widget name="main_menu/main_menu" width="640" height="480" flags="pass_unhandled_to_focused_child">
+		<data input="port rank card"/>
 		<on event="created" run="main menu intialize" label="ring_loop"/>
 		<on event="back" open="main_menu/quit_select/quit_screen"/>
 		<on event="b" open="main_menu/quit_select/quit_screen"/>
 		<child widget="main_menu/halo_logo" y="28"/>
 		<child widget="main_menu/main_menu_select_list"/>
+		<child widget="main_menu/main_menu/rank_card"/>
 	</widget>
 	<widget name="main_menu/main_menu_item_load_camp" type="text" width="256" height="33" bitmap="main_menu/menu_load_campaign" string_list="main_menu/main_menu_options" string_index="1" font="ui\small_ui" color="#000080FF">
 		<on event="a" run="new game if no plyr profiles" label="load_campaign" open="main_menu/campaign_select/campaign_menu" branch="true"/>

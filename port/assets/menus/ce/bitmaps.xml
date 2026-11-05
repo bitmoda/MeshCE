@@ -336,6 +336,9 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings">
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings__0.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/player_id/header_player_id">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/player_id/header_player_id.png" width="512" height="64"/>
+	</bitmap>
 	<bitmap name="main_menu/solo_level_select/header_load_level">
 		<frame png="ce/shell/main_menu/solo_level_select/header_load_level__0.png" width="512" height="64"/>
 	</bitmap>
@@ -437,5 +440,55 @@
 	</bitmap>
 	<bitmap name="blank">
 		<frame png="ce/port/blank__0.png" width="4" height="4"/>
+	</bitmap>
+	<bitmap name="rank/shape">
+		<frame png="ce/port/rank/shape__0.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__1.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__2.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__3.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__4.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__5.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__6.png" width="18" height="18"/>
+		<frame png="ce/port/rank/shape__7.png" width="18" height="18"/>
+	</bitmap>
+	<bitmap name="rank/mark">
+		<frame png="ce/port/rank/mark__0.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__1.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__2.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__3.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__4.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__5.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__6.png" width="18" height="18"/>
+		<frame png="ce/port/rank/mark__7.png" width="18" height="18"/>
+	</bitmap>
+	<bitmap name="rank/shape_big">
+		<frame png="ce/port/rank/shape__0.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__1.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__2.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__3.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__4.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__5.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__6.png" width="48" height="48"/>
+		<frame png="ce/port/rank/shape__7.png" width="48" height="48"/>
+	</bitmap>
+	<bitmap name="rank/service">
+		<frame png="ce/port/rank/service__0.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__1.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__2.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__3.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__4.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__5.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__6.png" width="18" height="18"/>
+		<frame png="ce/port/rank/service__7.png" width="18" height="18"/>
+	</bitmap>
+	<bitmap name="rank/mark_big">
+		<frame png="ce/port/rank/mark__0.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__1.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__2.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__3.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__4.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__5.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__6.png" width="48" height="48"/>
+		<frame png="ce/port/rank/mark__7.png" width="48" height="48"/>
 	</bitmap>
 </menus>

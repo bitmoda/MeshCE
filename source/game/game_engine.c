@@ -555,6 +555,7 @@ symbols in this file:
 #include "interface/hud_definitions.h"
 #include "interface/hud_messaging.h"
 #include "clips.h" /* port: the free camera's text stream */
+#include "rank_result.h" /* port: the scoreboard's competitive level */
 #include "interface/player_ui.h"
 #include "interface/terminal.h"
 #include "interface/ui_widget.h"
@@ -2361,7 +2362,7 @@ static void game_engine_rasterize_scoreboard(
 			NUMBEROF(row_string),
 			L"\t%s\t%s\t%s\t%s",
 			campaign ? L"" : get_place_string(entry),
-			player->name,
+			rank_scoreboard_name(player->name),
 			status_string,
 			ping_string);
 		row_string[NUMBEROF(row_string) - 1] = 0;
@@ -2643,7 +2644,7 @@ static void game_engine_rasterize_in_game_score(
 				NUMBEROF(row_string),
 				L"\t%s\t%s\t%s",
 				place_string,
-				player->name,
+				rank_scoreboard_name(player->name),
 				status_string);
 			row_string[NUMBEROF(row_string) - 1] = 0;
 
@@ -2872,7 +2873,7 @@ void game_engine_post_rasterize_post_game(
 			draw_string_set_color(
 				&team_colors[PIN(team_index, 0, 1)]);
 		}
-		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", player->name);
+		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", rank_scoreboard_name(player->name));
 		row_string[NUMBEROF(row_string) - 1] = 0;
 		drawline(row_string, draw_row, 0);
 		draw_string_set_color(&winner_color);

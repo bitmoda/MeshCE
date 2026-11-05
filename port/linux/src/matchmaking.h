@@ -25,7 +25,22 @@ enum
 enum
 {
 	MATCHMAKING_LOBBY_NAMES = 16,
-	MATCHMAKING_LOBBY_NAME_LENGTH = 12
+	MATCHMAKING_LOBBY_NAME_LENGTH = 12,
+	MATCHMAKING_CARDS = 16
+};
+
+/* one player's name card on an offer. the token is not here. */
+struct matchmaking_card
+{
+	char name[MATCHMAKING_LOBBY_NAME_LENGTH];
+	char account[48];
+	char core[24];
+	int foreground;
+	int background;
+	int foreground_color;
+	int background_color;
+	int games;
+	int level;
 };
 
 enum
@@ -92,6 +107,10 @@ struct matchmaking_offer
 	/* the network version the service accepts, when it refuses this build */
 	int network;
 	struct matchmaking_rules rules;
+	/* the match id the host reports a result for. empty when the offer has none. */
+	char match[40];
+	int card_count;
+	struct matchmaking_card cards[MATCHMAKING_CARDS];
 };
 
 /* one catalog row. the menu is these, not a list kept in the game. */
@@ -106,6 +125,8 @@ struct matchmaking_playlist
 	unsigned short port;
 	char modes[4][16];
 	int mode_count;
+	/* 1 when the catalog row says kind ranked. social rows stay 0. */
+	int ranked;
 };
 
 struct matchmaking_catalog
@@ -139,6 +160,8 @@ int matchmaking_queue_active(void);
 int matchmaking_is_ready(void);
 /* the latest offer, including ones already taken. 1 when there is one. */
 int matchmaking_offer_copy(struct matchmaking_offer *offer);
+/* the competitive level on the current offer's card for this gamertag, or -1. */
+int matchmaking_card_level(const char *name);
 /* the player left the menu. a party already in its lobby keeps publishing. */
 void matchmaking_leave(void);
 /* back at the main menu, or out of the lobby: the queue and the port are done */

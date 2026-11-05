@@ -31,6 +31,11 @@
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings/mouse_settings_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/player_id_profile_item" type="text" left="51" top="98" width="242" height="20" bitmap="bitmaps/option_bkds_join_field" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1" text="PLAYER ID">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/player_id/player_id_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/name_profile_item" type="text" left="51" top="78" width="242" height="20" bitmap="bitmaps/option_bkds_join_field_top" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_options" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
 		<on event="a" run="player profile change name" open="main_menu/settings_select/player_setup/player_profile_edit/name_edit/profile_name_screen"/>
 		<on event="start" run="player profile change name" open="main_menu/settings_select/player_setup/player_profile_edit/name_edit/profile_name_screen"/>
@@ -75,6 +80,7 @@
 		<data input="plyr prof edit select menu upd8"/>
 		<data input="port profile rows"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/name_profile_item"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/player_id_profile_item"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/controller_setup_profile_item"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepads_profile_item"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings_profile_item"/>

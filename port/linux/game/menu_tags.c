@@ -410,6 +410,9 @@ static char const *const port_function_names[] =
 	"port clips open", "port clips play", "port clips delete",
 	"port clips page up", "port clips page down",
 	"port clips keep down", "port clips keep up",
+	/* (a profile's Player ID) */
+	"port rank open", "port rank next", "port rank previous", "port rank save", "port rank cancel",
+	"port rank card edit",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
@@ -442,6 +445,8 @@ static char const *const port_game_data_input_names[] =
 	"port mm update",
 	/* (a profile's CLIPS) */
 	"port clips list",
+	/* (the main menu's rank card, and Player ID) */
+	"port rank card", "port rank id",
 };
 
 static struct

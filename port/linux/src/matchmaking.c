@@ -26,6 +26,7 @@ joins that invite.
 #include "p2p.h"
 #include "halo_port_limits.h"
 #include "matchmaking.h"
+#include "rank_account.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -511,6 +512,7 @@ static void catalog_store(const char *payload)
 		const char *modes;
 		const char *modes_end;
 		char mode_list[256];
+		char kind[16];
 		int mode;
 
 		if (!array_item(stored, index, &item, &item_end))
@@ -554,6 +556,9 @@ static void catalog_store(const char *payload)
 					row->mode_count++;
 			}
 		}
+		row->ranked = 0;
+		if (json_string(object, "kind", kind, (int)sizeof(kind)) && !strcmp(kind, "ranked"))
+			row->ranked = 1;
 		catalog.count++;
 	}
 	if (!catalog.count)
@@ -683,6 +688,57 @@ static void offer_parties(struct matchmaking_offer *offer, const char *payload)
 	}
 }
 
+static void offer_cards(struct matchmaking_offer *offer, const char *payload)
+{
+	const char *list;
+	const char *list_end;
+	char stored[4096];
+	int length;
+	int index;
+
+	if (!object_field(payload, "cards", &list, &list_end))
+		return;
+	length = (int)(list_end - list);
+	if (length < 0 || length >= (int)sizeof(stored))
+		return;
+	memcpy(stored, list, (size_t)length);
+	stored[length] = 0;
+	for (index = 0; index < MATCHMAKING_CARDS; index++)
+	{
+		struct matchmaking_card *card;
+		const char *item;
+		const char *item_end;
+		char object[512];
+		long number;
+
+		if (!array_item(stored, index, &item, &item_end))
+			break;
+		if ((int)(item_end - item) >= (int)sizeof(object))
+			break;
+		memcpy(object, item, (size_t)(item_end - item));
+		object[item_end - item] = 0;
+		card = &offer->cards[offer->card_count];
+		if (!json_string(object, "name", card->name, (int)sizeof(card->name)) || !card->name[0])
+			continue;
+		offer_name_keep(card->name);
+		json_string(object, "account", card->account, (int)sizeof(card->account));
+		json_string(object, "core", card->core, (int)sizeof(card->core));
+		if (json_number(object, "foreground", &number))
+			card->foreground = (int)number;
+		if (json_number(object, "background", &number))
+			card->background = (int)number;
+		if (json_number(object, "foregroundColor", &number))
+			card->foreground_color = (int)number;
+		if (json_number(object, "backgroundColor", &number))
+			card->background_color = (int)number;
+		if (json_number(object, "games", &number))
+			card->games = (int)number;
+		if (json_number(object, "level", &number))
+			card->level = (int)number;
+		offer->card_count++;
+	}
+}
+
 static void offer_clear(struct matchmaking_offer *offer)
 {
 	int index;
@@ -709,6 +765,7 @@ static void offer_read(struct matchmaking_offer *offer, const char *payload, con
 	json_string(payload, "map", offer->map, sizeof(offer->map));
 	json_string(payload, "name", offer->name, sizeof(offer->name));
 	json_string(payload, "invite", offer->invite, sizeof(offer->invite));
+	json_string(payload, "match", offer->match, sizeof(offer->match));
 	if (!map_ok(offer->map))
 		offer->map[0] = 0;
 	rules_default(&offer->rules, offer->playlist, offer->map[0] ? offer->map : "chillout");
@@ -733,6 +790,7 @@ static void offer_read(struct matchmaking_offer *offer, const char *payload, con
 		offer->local_max = (int)number;
 	offer_names(offer, payload);
 	offer_parties(offer, payload);
+	offer_cards(offer, payload);
 	if (json_number(payload, "bots", &number) && number >= 0 && number <= 16)
 		offer->bots = (int)number;
 	if (json_bool(payload, "teams", &teams))
@@ -909,7 +967,7 @@ static int link_send(struct matchmaking_link *link, const unsigned char *packet,
 
 static int link_packet(struct matchmaking_link *link, unsigned char header, const unsigned char *body, int size)
 {
-	unsigned char packet[2048];
+	unsigned char packet[4096];
 	int remaining;
 
 	if (size < 0 || size > (int)sizeof(packet) - 5)
@@ -990,9 +1048,23 @@ static int link_connected(struct matchmaking_link *link)
 	return 1;
 }
 
+static int link_subscribe_topic(struct matchmaking_link *link, const char *topic, int packet_id)
+{
+	unsigned char body[160];
+	int size = 0;
+
+	if (!topic || !topic[0] || (int)strlen(topic) + 6 >= (int)sizeof(body))
+		return 0;
+	body[size++] = (unsigned char)((packet_id >> 8) & 0xFF);
+	body[size++] = (unsigned char)(packet_id & 0xFF);
+	size += put_text(body + size, topic);
+	body[size++] = 0;
+	return link_packet(link, 0x82, body, size);
+}
+
 static int link_subscribe(struct matchmaking_link *link, const char *id)
 {
-	unsigned char body[256];
+	unsigned char body[512];
 	char topic[96];
 	int size = 0;
 
@@ -1003,16 +1075,28 @@ static int link_subscribe(struct matchmaking_link *link, const char *id)
 	snprintf(topic, sizeof(topic), "hceu/3/mm/v1/offer/%s", id);
 	size += put_text(body + size, topic);
 	body[size++] = 0;
+	snprintf(topic, sizeof(topic), "hceu/3/mm/v1/register/%s/reply", id);
+	if (size + 2 + (int)strlen(topic) + 1 < (int)sizeof(body))
+	{
+		size += put_text(body + size, topic);
+		body[size++] = 0;
+	}
+	snprintf(topic, sizeof(topic), "hceu/3/mm/v1/result/%s/reply", id);
+	if (size + 2 + (int)strlen(topic) + 1 < (int)sizeof(body))
+	{
+		size += put_text(body + size, topic);
+		body[size++] = 0;
+	}
 	return link_packet(link, 0x82, body, size);
 }
 
 static int link_publish(struct matchmaking_link *link, const char *topic, const char *payload, int retain)
 {
-	unsigned char body[640];
+	unsigned char body[3200];
 	int size = 0;
 	int length = (int)strlen(payload);
 
-	if (length > 400)
+	if (length > 2800)
 		return 0;
 	size += put_text(body, topic);
 	memcpy(body + size, payload, (size_t)length);
@@ -1079,6 +1163,26 @@ static void link_publish_in(struct matchmaking_link *link, const unsigned char *
 		memcpy(payload, body + payload_size, (size_t)(remaining - payload_size));
 		payload[remaining - payload_size] = 0;
 		catalog_store(payload);
+		return;
+	}
+	/* the length is the prefix only. one extra character compares the id and misses every reply. */
+	if (!strncmp(topic, "hceu/3/mm/v1/register/", sizeof("hceu/3/mm/v1/register/") - 1) ||
+		!strncmp(topic, "hceu/3/mm/v1/account/", sizeof("hceu/3/mm/v1/account/") - 1) ||
+		!strncmp(topic, "hceu/3/mm/v1/profile/", sizeof("hceu/3/mm/v1/profile/") - 1) ||
+		!strncmp(topic, "hceu/3/mm/v1/result/", sizeof("hceu/3/mm/v1/result/") - 1))
+	{
+		payload_size = 2 + topic_length;
+		if ((packet[0] & 0x06) != 0)
+		{
+			if (payload_size + 2 > remaining)
+				return;
+			payload_size += 2;
+		}
+		if (payload_size > remaining || remaining - payload_size >= (int)sizeof(payload))
+			return;
+		memcpy(payload, body + payload_size, (size_t)(remaining - payload_size));
+		payload[remaining - payload_size] = 0;
+		rank_apply_downlink(topic, payload, id);
 		return;
 	}
 	snprintf(wanted, sizeof(wanted), "hceu/3/mm/v1/offer/%s", id);
@@ -1192,6 +1296,8 @@ static void queue_payload(char *payload, int size, const char *playlist, const c
 	int players)
 {
 	char escaped[32];
+	char extra[1100];
+	int wrote;
 	int cap = players_for(playlist);
 
 	if (locals < 1)
@@ -1205,14 +1311,24 @@ static void queue_payload(char *payload, int size, const char *playlist, const c
 	if (players > cap)
 		players = cap;
 	json_escape(escaped, sizeof(escaped), name);
-	snprintf(payload, (size_t)size,
+	wrote = snprintf(payload, (size_t)size,
 		"{\"playlist\":\"%s\",\"name\":\"%s\",\"network\":%d,\"ready\":%s,\"locals\":%d,\"players\":%d}",
 		playlist, escaped, HALO_PORT_NETWORK_VERSION, ready ? "true" : "false", locals, players);
+	if (wrote < 1 || wrote >= size)
+		return;
+	if (!rank_queue_extra(extra, (int)sizeof(extra)) || !extra[0])
+		return;
+	if (wrote + (int)strlen(extra) + 1 >= size)
+		return;
+	payload[wrote - 1] = 0;
+	memcpy(payload + wrote - 1, extra, strlen(extra) + 1);
+	memcpy(payload + strlen(payload), "}", 2);
 }
 
 static void *matchmaking_thread(void *unused)
 {
 	struct matchmaking_link *link = &link_state;
+	unsigned long rank_service_at = 0;
 
 	(void)unused;
 	link->socket = -1;
@@ -1237,7 +1353,7 @@ static void *matchmaking_thread(void *unused)
 		char name[12];
 		char host_playlist[16];
 		char topic[96];
-		char payload[320];
+		char payload[1400];
 
 		pthread_mutex_lock(&matchmaking_lock);
 		listening = matchmaking.listening;
@@ -1399,6 +1515,7 @@ static void *matchmaking_thread(void *unused)
 						queue_players);
 					if (link_publish(link, topic, payload, 1))
 					{
+						rank_kick_published();
 						link->published = 1;
 						link->published_at = GetTickCount();
 						link->last_queue = GetTickCount();
@@ -1411,6 +1528,37 @@ static void *matchmaking_thread(void *unused)
 						pthread_mutex_unlock(&matchmaking_lock);
 					}
 				}
+			}
+		}
+		if (link->subscribed && (!rank_service_at || GetTickCount() - rank_service_at >= QUEUE_INTERVAL))
+		{
+			char rank_topic[128];
+			char rank_body[2560];
+			unsigned generation = 0;
+
+			rank_service_at = GetTickCount();
+			while (rank_subscribe_next(rank_topic, (int)sizeof(rank_topic)))
+			{
+				if (!link_subscribe_topic(link, rank_topic, 2))
+					break;
+				rank_subscribe_done(rank_topic);
+			}
+			if (rank_register_pending(rank_body, (int)sizeof(rank_body)))
+			{
+				snprintf(rank_topic, sizeof(rank_topic), "hceu/3/mm/v1/register/%s", id);
+				link_publish(link, rank_topic, rank_body, 0);
+			}
+			if (rank_profile_pending(rank_topic, (int)sizeof(rank_topic), rank_body, (int)sizeof(rank_body),
+				&generation))
+			{
+				if (link_publish(link, rank_topic, rank_body, 0))
+					rank_profile_sent(generation);
+			}
+			snprintf(rank_topic, sizeof(rank_topic), "hceu/3/mm/v1/result/%s", id);
+			if (rank_result_pending(rank_body, (int)sizeof(rank_body)))
+			{
+				if (link_publish(link, rank_topic, rank_body, 0))
+					rank_result_sent();
 			}
 		}
 		/* the same 5 seconds as the queue. one publish is not enough. an empty
@@ -1426,8 +1574,9 @@ static void *matchmaking_thread(void *unused)
 
 				json_escape(escaped, sizeof(escaped), invite);
 				snprintf(topic, sizeof(topic), "hceu/3/mm/v1/hosted/%s", id);
-				snprintf(payload, sizeof(payload), "{\"playlist\":\"%s\",\"invite\":\"%s\",\"port\":%u}",
-					host_playlist, escaped, (unsigned)host_port);
+				snprintf(payload, sizeof(payload),
+					"{\"playlist\":\"%s\",\"invite\":\"%s\",\"port\":%u,\"client\":\"%s\"}",
+					host_playlist, escaped, (unsigned)host_port, id);
 				if (link_publish(link, topic, payload, 1))
 				{
 					link->hosted_queued = 1;
@@ -1864,6 +2013,8 @@ int matchmaking_name_is_filler(const wchar_t *name)
 
 void matchmaking_find_game(void)
 {
+	if (rank_search_blocks())
+		return;
 	pthread_mutex_lock(&matchmaking_lock);
 	if (matchmaking.queueing && !matchmaking.ready)
 	{
@@ -1903,6 +2054,26 @@ int matchmaking_offer_copy(struct matchmaking_offer *offer)
 		*offer = matchmaking.offer;
 	pthread_mutex_unlock(&matchmaking_lock);
 	return ready;
+}
+
+int matchmaking_card_level(const char *name)
+{
+	int level = -1;
+	int index;
+
+	if (!name || !name[0])
+		return -1;
+	pthread_mutex_lock(&matchmaking_lock);
+	for (index = 0; index < matchmaking.offer.card_count && index < MATCHMAKING_CARDS; index++)
+	{
+		if (!strcmp(matchmaking.offer.cards[index].name, name))
+		{
+			level = matchmaking.offer.cards[index].level;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&matchmaking_lock);
+	return level;
 }
 
 void matchmaking_leave(void)
@@ -1950,16 +2121,22 @@ void matchmaking_reset(void)
 		matchmaking.want_clear = 1;
 	pthread_mutex_unlock(&matchmaking_lock);
 	screen_party_clear();
+	rank_search_clear();
 }
 
 void matchmaking_stop(void)
 {
+	struct matchmaking_offer offer;
+	int index;
+	int note;
+
 	pthread_mutex_lock(&matchmaking_lock);
 	if (!matchmaking.queueing && !matchmaking.published_queue)
 	{
 		pthread_mutex_unlock(&matchmaking_lock);
 		return;
 	}
+	offer = matchmaking.offer;
 	matchmaking.queueing = 0;
 	matchmaking.in_party = 0;
 	matchmaking.ready = 0;
@@ -1970,9 +2147,13 @@ void matchmaking_stop(void)
 	the game is loading. a later leave of a menu must not drop the port. */
 	matchmaking.committed = 1;
 	matchmaking.search++;
-	if (matchmaking.published_queue)
-		matchmaking.want_clear = 1;
 	pthread_mutex_unlock(&matchmaking_lock);
+	note = rank_match_begin(offer.match, offer.playlist, offer.teams);
+	if (note)
+	{
+		for (index = 0; index < offer.card_count && index < MATCHMAKING_CARDS; index++)
+			rank_match_note(offer.cards[index].name, offer.cards[index].account, offer.cards[index].level);
+	}
 }
 
 void matchmaking_commit_join(void)
@@ -1995,8 +2176,6 @@ void matchmaking_joined_link(void)
 	matchmaking.offer_ready = 0;
 	matchmaking.joined_link = 1;
 	hosted_drop_locked();
-	if (matchmaking.published_queue)
-		matchmaking.want_clear = 1;
 	pthread_mutex_unlock(&matchmaking_lock);
 }
 
