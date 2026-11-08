@@ -2632,6 +2632,50 @@ void network_game_server_handle_client_update_packet(
 	return;
 }
 
+/* a second local player is not named in the offer. that player takes the
+team of someone already listed on the same machine, or the machine's party
+once its peer id has arrived. */
+static int matchmaking_player_team(
+	struct network_game_server *server,
+	struct network_player *player)
+{
+	short host_machine;
+	int host_local;
+	int listed;
+	int team;
+	long index;
+
+	host_machine = network_game_client_get_local_machine_index();
+	host_local = player->machine_index == host_machine &&
+		player->controller_index < MAXIMUM_LOCAL_PLAYERS;
+	listed = 0;
+	team = matchmaking_listed_team(player->name, host_local, &listed);
+	if (listed)
+		return team;
+	for (index = 0; index < MAXIMUM_NETWORK_PLAYER_COUNT; index++)
+	{
+		struct network_player *other;
+		int other_local;
+		int other_listed;
+		int other_team;
+
+		other = &server->game.players[index];
+		if (other == player || !network_player_is_valid(other) ||
+			other->machine_index != player->machine_index)
+			continue;
+		other_local = other->machine_index == host_machine &&
+			other->controller_index < MAXIMUM_LOCAL_PLAYERS;
+		other_listed = 0;
+		other_team = matchmaking_listed_team(other->name, other_local, &other_listed);
+		if (other_listed && (other_team == 0 || other_team == 1))
+			return other_team;
+	}
+	team = matchmaking_team_for_machine((int)player->machine_index);
+	if (team == 0 || team == 1)
+		return team;
+	return matchmaking_join_team(player->name, host_local);
+}
+
 boolean network_game_server_add_player_to_game(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
@@ -2652,9 +2696,7 @@ boolean network_game_server_add_player_to_game(
 		the host's own player is team 0. a remote human with the same name
 		is the other team when the offer lists that name there too. */
 		{
-			int host_local = player->machine_index == network_game_client_get_local_machine_index() &&
-				player->controller_index < MAXIMUM_LOCAL_PLAYERS;
-			int party_team = matchmaking_join_team(player->name, host_local);
+			int party_team = matchmaking_player_team(server, player);
 
 			if (party_team == 0 || party_team == 1)
 				player->team_index = (char)party_team;
@@ -4551,9 +4593,7 @@ static boolean network_game_server_reseat_matchmaking(
 		if (player->machine_index == host_machine &&
 			player->controller_index >= MAXIMUM_LOCAL_PLAYERS)
 			continue;
-		team = matchmaking_join_team(player->name,
-			player->machine_index == host_machine &&
-			player->controller_index < MAXIMUM_LOCAL_PLAYERS);
+		team = matchmaking_player_team(server, player);
 		if (team != 0 && team != 1)
 			continue;
 		if (player->team_index == (char)team)

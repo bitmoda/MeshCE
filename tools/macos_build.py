@@ -145,7 +145,7 @@ def build_host(update_build):
         link += [*(f"-F{directory}" for directory in frameworks),
                  "-framework", "libEGL", "-framework", "libGLESv2",
                  *(f"-Wl,-rpath,{directory}" for directory in frameworks)]
-    link += [f"-F{sparkle.parent}", "-framework", "Sparkle", "-framework", "Cocoa",
+    link += [f"-F{sparkle.parent}", "-framework", "Sparkle", "-framework", "Cocoa", "-framework", "Security",
              f"-Wl,-rpath,{sparkle.parent}", "-o", BUILD / "halo"]
     run(*link)
 
@@ -361,9 +361,9 @@ def package_into(app, data_root, *, sign_identity, release, version, build, cont
     run("codesign", *signing, sparkle)
     for binary in (sdl, *angle_libraries):
         run("codesign", *signing, binary)
-    app_signing = [*signing]
+    app_signing = list(signing)
     if release:
-        app_signing += ["--entitlements", ROOT / "port/macos/host.entitlements"]
+        app_signing += ["--entitlements", str(ROOT / "port/macos/host.entitlements")]
     run("codesign", *app_signing, app)
     run("codesign", "--verify", "--deep", "--strict", app)
 

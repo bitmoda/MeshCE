@@ -319,8 +319,9 @@ half of the players who may vote, the target counted, and at least two;
 starting one needs `network.votekick_minutes` played on this host in its
 own ticks, voting two minutes; one vote runs at a time, and a failed vote
 cools its starter down and protects its target. A vote that passes kicks as
-the `kick` command does, and the host refuses the address and hardware id
-for `network.votekick_ban_minutes`. The host sends each client
+the `kick` command does, and the host refuses the address and hardware id.
+The first refusal is 1 hour. Each further one doubles that, and it stops
+growing at 7 days. The count stays after the wait. The host sends each client
 `_distributed_message_votekick_status` every second while a vote runs (and
 as it changes), for the scoreboard, whose right click frees the mouse to
 pick a player; the host's own scoreboard adds Kick and Ban. Builds without

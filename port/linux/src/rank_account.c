@@ -229,6 +229,10 @@ static void rank_load_path(const char *path, struct rank_account *record)
 			record->games = atoi(value) < 0 ? 0 : atoi(value);
 		else if (!strcmp(line, "level"))
 			record->level = atoi(value) < 0 ? 0 : atoi(value);
+		else if (!strcmp(line, "wins"))
+			record->wins = atoi(value) < 0 ? 0 : atoi(value);
+		else if (!strcmp(line, "losses"))
+			record->losses = atoi(value) < 0 ? 0 : atoi(value);
 		else if (!strcmp(line, "chosen"))
 			record->chosen = atoi(value) ? 1 : 0;
 	}
@@ -255,6 +259,8 @@ static void rank_save_path(const char *path, const struct rank_account *record)
 	fprintf(file, "backgroundColor=%d\n", rank_clamp(record->background_color, 17));
 	fprintf(file, "games=%d\n", record->games < 0 ? 0 : record->games);
 	fprintf(file, "level=%d\n", record->level < 0 ? 0 : record->level);
+	fprintf(file, "wins=%d\n", record->wins < 0 ? 0 : record->wins);
+	fprintf(file, "losses=%d\n", record->losses < 0 ? 0 : record->losses);
 	fprintf(file, "chosen=%d\n", record->chosen ? 1 : 0);
 	fclose(file);
 }
@@ -1422,7 +1428,7 @@ int rank_result_context(char *match, int match_size, char *playlist, int playlis
 			rank_copy_text(token, token_size, rank_state.current.token);
 		else if (rank_state.party_count > 0 && rank_state.party[0].token[0])
 			rank_copy_text(token, token_size, rank_state.party[0].token);
-		ok = token[0] ? 1 : 0;
+		ok = 1;
 	}
 	rank_unlock();
 	return ok;
@@ -1467,5 +1473,25 @@ void rank_result_sent(void)
 	rank_lock();
 	rank_state.result_pending = 0;
 	rank_state.result_sent = 1;
+	rank_unlock();
+}
+
+void rank_mesh_progress(int games, int level, int wins, int losses)
+{
+	rank_lock();
+	if (!rank_state.current_path[0] || !rank_state.current.token[0])
+	{
+		rank_unlock();
+		return;
+	}
+	if (games >= 0)
+		rank_state.current.games = games;
+	if (level >= 0)
+		rank_state.current.level = level;
+	if (wins >= 0)
+		rank_state.current.wins = wins;
+	if (losses >= 0)
+		rank_state.current.losses = losses;
+	rank_save_path(rank_state.current_path, &rank_state.current);
 	rank_unlock();
 }

@@ -62,6 +62,7 @@ only look up and create stand-ins.
 #include "posix.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "peer_mesh.h"
 #include "ikcp.h"
 #ifdef HALO_PROFILE
 #include "profile_trace.h"
@@ -3658,6 +3659,7 @@ void p2p_initialize(unsigned long local_address)
 	long tunnel_port = config_integer("network.tunnel_port");
 	int index;
 
+	peer_mesh_start();
 	p2p_identifier();
 	if (p2p.running || !config_boolean("network.online"))
 		return;

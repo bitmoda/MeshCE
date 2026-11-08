@@ -11,9 +11,9 @@ h:\ is the Halo Custom Edition install paths.custom_edition names, if any
 (its maps folder holds the resource maps Custom Edition maps need, and more
 maps).
 Every other drive letter X:\ is the subdirectory X/ of the save root (z:\ holds the persistent cache and saves,
-u:\ user data, t:\ title data): paths.saves, else %APPDATA%/halo on
-Windows, $XDG_DATA_HOME/halo-linux or ~/.local/share/halo-linux on Linux,
-and ~/Library/Application Support/OpenCE on Mac. Those are the folders
+u:\ user data, t:\ title data): paths.saves, else %APPDATA%/OpenCE Mesh on
+Windows, $XDG_DATA_HOME/opence-mesh or ~/.local/share/opence-mesh on Linux,
+and ~/Library/Application Support/OpenCE Mesh on Mac. Those are the folders
 OpenCE uses. Path components are
 matched case-insensitively, like the Xbox's FATX volumes.
 */
@@ -230,18 +230,16 @@ const char *platform_save_root(void)
 			snprintf(root, sizeof(root), "%s", environment);
 #ifdef HALO_MACOS
 		else if (home && *home)
-			snprintf(root, sizeof(root), "%s/Library/Application Support/OpenCE", home);
+			snprintf(root, sizeof(root), "%s/Library/Application Support/OpenCE Mesh", home);
 #endif
 #ifdef _WIN32
-		/* the Windows build (port/windows) keeps saves in the roaming
-		application data folder, in the same halo folder OpenCE uses */
 		else if (getenv("APPDATA") && *getenv("APPDATA"))
-			snprintf(root, sizeof(root), "%s/halo", getenv("APPDATA"));
+			snprintf(root, sizeof(root), "%s/OpenCE Mesh", getenv("APPDATA"));
 #endif
 		else if (data_home && *data_home)
-			snprintf(root, sizeof(root), "%s/halo-linux", data_home);
+			snprintf(root, sizeof(root), "%s/opence-mesh", data_home);
 		else if (home && *home)
-			snprintf(root, sizeof(root), "%s/.local/share/halo-linux", home);
+			snprintf(root, sizeof(root), "%s/.local/share/opence-mesh", home);
 		else
 			snprintf(root, sizeof(root), "%s", platform_data_root());
 		trim_separators(root);

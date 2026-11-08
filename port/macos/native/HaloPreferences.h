@@ -28,9 +28,10 @@ BOOL HaloUpdateConfigurationIsValid(NSDictionary *info);
 /* Launch migration is eligible only for the canonical default support folder,
    never a HALO_SAVE_ROOT override. The copy helper is separately fixtureable.
    Existing destination files/settings and the complete legacy tree survive. */
-/* The live folder is Application Support/OpenCE, the same one OpenCE uses.
-   When that folder is not already in use, an older Halo OG or Halo CE
-   Universal folder can be copied into it. Nil when neither is present. */
+/* HaloLegacySupportDirectory finds Halo OG or Halo CE Universal.
+   A copy into Application Support/OpenCE runs only for that older folder.
+   This build stores its own files in Application Support/OpenCE Mesh, so
+   that copy does not run. Nil when neither older folder is present. */
 NSURL *HaloLegacySupportDirectory(void);
 BOOL HaloSupportDirectoryNeedsMigration(NSURL *directory);
 BOOL HaloMigrateLegacySupportDirectory(NSURL *legacy, NSURL *destination,

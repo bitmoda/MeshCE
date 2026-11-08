@@ -22,6 +22,9 @@ struct rank_account
 	int background_color;
 	int games;
 	int level;
+	/* ranked streaks. both clear when the level changes. */
+	int wins;
+	int losses;
 	/* 1 when this profile has a token */
 	int ready;
 	/* 1 after the player has picked an emblem */
@@ -90,6 +93,8 @@ int rank_result_context(char *match, int match_size, char *playlist, int playlis
 void rank_result_submit(const char *body);
 int rank_result_pending(char *body, int body_size);
 void rank_result_sent(void);
+/* the mesh applied a result to this profile. */
+void rank_mesh_progress(int games, int level, int wins, int losses);
 
 void rank_json_escape(char *out, int size, const char *text);
 

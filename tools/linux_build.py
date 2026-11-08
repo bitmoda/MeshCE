@@ -234,6 +234,9 @@ PLATFORM_FLAGS = [
     "-Wno-missing-braces",
     "-Wno-unused-variable",
     "-Wno-ignored-pragmas",
+    # peer identity seal (posix_peer.c). The Android guest builds its own
+    # platform flags and does not get this: it does not link that file.
+    "-DHALO_PEER_ELEMENT=1",
 ]
 
 # Platform files named posix_*.c talk to glibc only. They are built with the
@@ -634,7 +637,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         posix_cflags = " ".join(POSIX_FLAGS + target + [f"-I{platform_dir}"])
         mbedtls_include = f"-I{MBEDTLS_DIR / 'include'}"
         for source in sorted(platform_dir.glob("*.c")):
-            if source.name in ("posix_update.c", "posix_dtls.c"):
+            if source.name in ("posix_update.c", "posix_dtls.c", "posix_peer.c"):
                 add_object(source, f"{posix_cflags} {mbedtls_include}", posix=True)
             elif source.name == "posix_upnp.c":
                 add_object(source, f"{posix_cflags} -I{MINIUPNPC_DIR / 'include'} -DMINIUPNP_STATICLIB", posix=True)

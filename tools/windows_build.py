@@ -459,6 +459,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             elif source.name == "win32_crash.c":
                 # the build's number and configuration name its crash reports
                 add_object(source, f"{win32_cflags} {updater_defines(getattr(sln, 'port_release', False))}")
+            elif source.name == "win32_peer.c":
+                add_object(source, f"{win32_cflags} {mbedtls_include}")
             else:
                 add_object(source, win32_cflags if source.name.startswith("win32_") else platform_cflags)
         # internet play's UPnP (port/third_party/miniupnpc), on Winsock, as

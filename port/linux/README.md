@@ -464,8 +464,7 @@ display. Firing, animation, sound and world lights continue.
 | `network.voice_proximity` | `15.0` | `HALO_NET_VOICE_PROXIMITY` | When you host: the distance in world units (1 unit is approximately 3 metres) at which players are near, for voice chat. `5` to `100`. |
 | `network.text_chat` | `"on"` | `HALO_NET_TEXT_CHAT` | When you host: the text chat. `"on"`, lines with links refused; `"links"`, links allowed; `"off"`, no chat (in either case). Always off in a game listed in the server browser. TEXT CHAT on Server Setup, beside the invite link and LISTING (and on Hardcore's server page), writes ON or OFF here. A saved `"links"` shows as ON. Refer to "Text chat". |
 | `network.votekick` | `true` | `HALO_NET_VOTEKICK` | When you host: `true`, the players can vote to kick a player. Refer to "Security". `false`: no votes. VOTE KICK in Server Setup > Teamplay Options (in co-op, Voice and Voting) writes its choice here. |
-| `network.votekick_minutes` | `5` | `HALO_NET_VOTEKICK_MINUTES` | When you host: the minutes that a player must play on the server before the player can start a vote to kick (`0` to `60`). To vote, a player must play for 2 minutes, or for this time if it is less. |
-| `network.votekick_ban_minutes` | `30` | `HALO_NET_VOTEKICK_BAN_MINUTES` | When you host: the minutes that a player who is kicked by a vote cannot join again (`1` to `1440`). |
+| `network.votekick_minutes` | `5` | `HALO_NET_VOTEKICK_MINUTES` | When you host: the minutes that a player must play on the server before the player can start a vote to kick (`0` to `60`). To vote, a player must play for 2 minutes, or for this time if it is less. A player kicked by a vote cannot join again for 1 hour the first time. Each further kick doubles that wait, and it stops growing at 7 days. |
 | `network.map_share` | `true` | `HALO_NET_MAP_SHARE` | When you host: send a player who joins without the game's Custom Edition map the map, and the resource maps that it needs and that the player does not have. SHARE MAPS in Server Setup > Map Sharing writes its choice here. Refer to "Map sharing". |
 | `network.map_share_upload` | `1024` | `HALO_NET_MAP_SHARE_UPLOAD` | When you host: the most kilobytes per second that the game sends of maps (`16` to `20480`, 20 MB/s). UPLOAD LIMIT in Server Setup > Map Sharing writes its choice here. |
 | `network.map_seed` | `true` | `HALO_NET_MAP_SEED` | When you play in the game of another machine: help send its map to players who join without it. HELP SEND MAPS in Settings > Network Setup > Map Sharing. |
@@ -1084,8 +1083,9 @@ Only machines with the invite can find the game:
     vote for 5 minutes, and nobody can start a vote against the same player
     for 10 minutes.
   - Nobody can vote to kick a player of the host.
-  - A player kicked by a vote cannot join again for
-    `network.votekick_ban_minutes` (30), by address and hardware id.
+  - A player kicked by a vote cannot join again, by address and hardware
+    id. The first time is 1 hour. Each further time doubles that, and it
+    stops growing at 7 days. The count stays after the wait.
   - A player who leaves during a vote against them is kept out the same
     way, as if the vote passed. While the vote runs, the host refuses the
     player if they try to join again. Thus nobody can avoid a vote by

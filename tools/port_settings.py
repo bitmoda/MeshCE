@@ -758,9 +758,9 @@ def LOADOUT_HELPS(slot: str) -> list:
 
 STRING_OVERRIDES.update({
     f"{MT}/multiplayer_options": ["JOIN GAME", "CREATE GAME", "INTERNET", "LAN", "DIRECT LINK", "EDIT GAMETYPES",
-                                  "SERVER BROWSER", "CO-OP CAMPAIGN"],
+                                  "SERVER BROWSER", "CO-OP CAMPAIGN", "MATCHMAKING"],
     f"{MT}/multiplayer_option_descriptions": [
-        "Browse the games on the\\nInternet.",
+        "Find a match with other players.\\nThe best connection hosts.",
         "Join a multiplayer game on\\nyour LAN.",
         "Join a game by its invite link,\\nor one a Discord invite\\nreached.",
         "Host a game on the Internet:\\nplayers join by its invite\\nlink or Discord.",

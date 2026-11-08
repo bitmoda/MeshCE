@@ -181,16 +181,15 @@ static int read_file(char (*urls)[URL_SIZE], unsigned char (*keys)[KEY_SIZE], in
 
 static void read_masters(void)
 {
-	char urls[MAXIMUM_MASTERS][URL_SIZE];
-	unsigned char keys[MAXIMUM_MASTERS][KEY_SIZE];
-	int count = read_file(urls, keys, MAXIMUM_MASTERS);
+	static int logged;
 
-	if (!count)
-		count = read_defaults(urls, keys, MAXIMUM_MASTERS);
+	if (!logged)
+	{
+		logged = 1;
+		platform_log("server list: this client does not ask the old master servers");
+	}
 	pthread_mutex_lock(&list.lock);
-	memcpy(list.urls, urls, sizeof(urls));
-	memcpy(list.keys, keys, sizeof(keys));
-	list.count = count;
+	list.count = 0;
 	pthread_mutex_unlock(&list.lock);
 }
 

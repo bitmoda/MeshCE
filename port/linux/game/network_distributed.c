@@ -3784,6 +3784,7 @@ void network_distributed_new_game(
 	network_aim_assist_reset();
 	network_mods_reset();
 	network_votekick_new_game();
+	network_peer_new_game();
 }
 
 /* The film stays up until every machine still in the game has its world,
@@ -4227,6 +4228,7 @@ void distributed_screen_share_client_tick(void)
 	message.share = share;
 	distributed_send(&message, _distributed_message_screen_share, 1, (word)sizeof(message),
 		_distributed_to_host_reliably);
+	network_peer_client_tick();
 }
 
 /* this machine's Split Screen, and each answer already heard, to every
@@ -4253,6 +4255,7 @@ void distributed_screen_share_host_tick(void)
 
 	if (!global_network_game_server_get())
 		return;
+	network_peer_host_tick();
 	share = config_boolean("display.teammate_views") ? 1 : 0;
 	local = network_game_client_get_local_machine_index();
 	if (!matchmaking_game_port())
@@ -4815,6 +4818,8 @@ void network_distributed_handle_message(
 	case _distributed_message_hit_reports:
 	case _distributed_message_blasts: entry_size = network_damage_entry_size(header.type); break;
 	case _distributed_message_ejection: entry_size = sizeof(struct distributed_ejection); break;
+	case _distributed_message_peer_id: entry_size = network_peer_id_entry_size(); break;
+	case _distributed_message_peer_report: entry_size = network_peer_report_entry_size(); break;
 	default: entry_size = network_objects_entry_size(header.type); break;
 	}
 	if (header.type == 0 || header.type >= NUMBER_OF_DISTRIBUTED_MESSAGES ||
@@ -4838,6 +4843,8 @@ void network_distributed_handle_message(
 	case _distributed_message_screen_share:
 	case _distributed_message_screen_share_down:
 	case _distributed_message_screen_party:
+	case _distributed_message_peer_id:
+	case _distributed_message_peer_report:
 		if (header.count < 1)
 			return;
 		break;
@@ -4886,6 +4893,21 @@ void network_distributed_handle_message(
 		{
 			return;
 		}
+		break;
+	case _distributed_message_peer_id:
+		if (game_connection() == _game_connection_network_server)
+		{
+			if (machine_index == NONE)
+				return;
+		}
+		else if (game_connection() != _game_connection_network_client || machine_index != NONE)
+		{
+			return;
+		}
+		break;
+	case _distributed_message_peer_report:
+		if (machine_index == NONE || game_connection() != _game_connection_network_server)
+			return;
 		break;
 	default:
 		if (game_connection() != _game_connection_network_client)
@@ -5149,6 +5171,12 @@ void network_distributed_handle_message(
 		break;
 	case _distributed_message_ejection:
 		distributed_handle_ejection(machine_index, entries, header.count);
+		break;
+	case _distributed_message_peer_id:
+		network_peer_handle_id(machine_index, entries, distributed_handling_stream_message);
+		break;
+	case _distributed_message_peer_report:
+		network_peer_handle_report(machine_index, entries, distributed_handling_stream_message);
 		break;
 	case _distributed_message_relayed_actions:
 		distributed_handle_actions((byte const *)entries, (byte const *)message + size, header.count);

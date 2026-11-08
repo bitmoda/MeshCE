@@ -1,10 +1,9 @@
 /*
 MATCHMAKING.C
 
-The matchmaking service. Its broker is not the one invites use (p2p_signal.c):
-that list is left as it is, and this address stays in the game rather than
-on the website. Topics are only under hceu/. The native game speaks MQTT
-3.1.1. The web client has its own address.
+The matchmaking service. Find Game uses the peer mesh. This client does not
+open the old broker at net.opence.org, and it does not publish on that
+broker's topics. The catalog below is the local list.
 
 The catalog is the menu. One client id is kept for the install. Choosing a
 playlist opens this machine's private lobby on that playlist's port and
@@ -26,14 +25,16 @@ joins that invite.
 #include "p2p.h"
 #include "halo_port_limits.h"
 #include "matchmaking.h"
+#include "peer_mesh.h"
 #include "rank_account.h"
+#include "mesh_service.h"
+#include "networking/network_game_protocol.h"
 
 #include <stdio.h>
 #include <string.h>
 
 enum
 {
-	MATCHMAKING_PORT = 1883,
 	QUEUE_INTERVAL = 5000,
 	KEEP_ALIVE = 30,
 	LINK_BUFFER = 16384,
@@ -41,8 +42,6 @@ enum
 	ID_GENERATED = 16,
 	ID_LIMIT = 64
 };
-
-static const char *const broker_host = "net.opence.org";
 
 static pthread_mutex_t matchmaking_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -333,7 +332,8 @@ static void rules_default(struct matchmaking_rules *rules, const char *playlist,
 	rules->radar_players = 2;
 	rules->primary = 2;
 	rules->secondary = 3;
-	rules->score = rules->mode == MATCHMAKING_MODE_SLAYER ? 50 : rules->mode == MATCHMAKING_MODE_CTF ? 3 : 5;
+	rules->score = rules->mode == MATCHMAKING_MODE_SLAYER ? mesh_score(playlist) :
+		rules->mode == MATCHMAKING_MODE_CTF ? 3 : 5;
 	rules->no_death_bonus = 1;
 	rules->no_kill_penalty = 1;
 	rules->teams = objective || hardcore;
@@ -409,7 +409,8 @@ static int role_named(const char *name)
 
 static int port_ok(long port)
 {
-	return port > 0 && port < 65536 && port != 5150 && port != 5151;
+	return port > 0 && port < 65536 && port != 5150 && port != 5151 &&
+		port != 5160 && port != 5161 && port != 5162;
 }
 
 /* the catalog's port for this playlist, else the ports the service uses */
@@ -424,11 +425,11 @@ static unsigned short playlist_port(const char *playlist)
 			return matchmaking.catalog.playlist[index].port;
 	}
 	if (!strcmp(playlist, "ffa"))
-		return 5161;
+		return (unsigned short)NETWORK_PLAYLIST_PORT_FFA;
 	if (!strcmp(playlist, "hardcore"))
-		return 5162;
-	if (!strcmp(playlist, "objective"))
-		return 5160;
+		return (unsigned short)NETWORK_PLAYLIST_PORT_HARDCORE;
+	if (!strcmp(playlist, "ranked"))
+		return (unsigned short)NETWORK_PLAYLIST_PORT_RANKED;
 	return 0;
 }
 
@@ -980,41 +981,8 @@ static int link_packet(struct matchmaking_link *link, unsigned char header, cons
 
 static int link_connect(struct matchmaking_link *link)
 {
-	struct sockaddr_in address;
-	unsigned long host;
-	int socket;
-
-	host = posix_resolve_ipv4(broker_host);
-	if (!host)
-	{
-		link_set(-1);
-		return 0;
-	}
-	socket = posix_socket(AF_INET, SOCK_STREAM, 0);
-	if (socket < 0)
-	{
-		link_set(-1);
-		return 0;
-	}
-	posix_socket_set_nonblocking(socket, 1);
-	memset(&address, 0, sizeof(address));
-	address.sin_family = AF_INET;
-	address.sin_port = host_order_short(MATCHMAKING_PORT);
-	address.sin_addr.s_addr = host;
-	if (posix_socket_connect(socket, &address, sizeof(address)) != 0)
-	{
-		int error = posix_socket_last_error();
-
-		if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-		{
-			posix_socket_close(socket);
-			link_set(-1);
-			return 0;
-		}
-	}
-	link->socket = socket;
-	link->last_io = GetTickCount();
-	return 1;
+	(void)link;
+	return 0;
 }
 
 /* the broker has accepted the TCP connection, so the session can start */
@@ -1109,6 +1077,9 @@ static void offer_store(const char *payload, int epoch, const char *playlist)
 {
 	struct matchmaking_offer offer;
 
+	/* a mesh search names the host. the broker's offer must not replace it. */
+	if (peer_mesh_searching())
+		return;
 	offer_read(&offer, payload, playlist);
 	pthread_mutex_lock(&matchmaking_lock);
 	if (epoch == matchmaking.epoch && matchmaking.queueing && matchmaking.accept_offers)
@@ -1414,6 +1385,7 @@ static void *matchmaking_thread(void *unused)
 		{
 			if (!link_connect(link))
 			{
+				mesh_account_serve();
 				posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, 1, 0, 0);
 				continue;
 			}
@@ -1804,13 +1776,58 @@ static void copy_short(char *destination, int size, const char *text, int limit)
 	destination[length] = 0;
 }
 
+static void catalog_fallback_locked(void);
+
 void matchmaking_watch(void)
 {
 	id_load();
+	peer_mesh_start();
 	pthread_mutex_lock(&matchmaking_lock);
 	matchmaking.listening = 1;
+	catalog_fallback_locked();
 	pthread_mutex_unlock(&matchmaking_lock);
 	matchmaking_ensure();
+}
+
+static void catalog_fallback_locked(void)
+{
+	struct matchmaking_playlist *row;
+
+	if (matchmaking.catalog_ready)
+		return;
+	memset(&matchmaking.catalog, 0, sizeof(matchmaking.catalog));
+	matchmaking.catalog.network = HALO_PORT_NETWORK_VERSION;
+	row = &matchmaking.catalog.playlist[0];
+	snprintf(row->id, sizeof(row->id), "ffa");
+	snprintf(row->name, sizeof(row->name), "FFA");
+	row->players = 8;
+	row->team_size = 1;
+	row->local_max = 4;
+	row->port = (unsigned short)NETWORK_PLAYLIST_PORT_FFA;
+	snprintf(row->modes[0], sizeof(row->modes[0]), "slayer");
+	row->mode_count = 1;
+	row = &matchmaking.catalog.playlist[1];
+	snprintf(row->id, sizeof(row->id), "hardcore");
+	snprintf(row->name, sizeof(row->name), "2v2");
+	row->players = 4;
+	row->teams = 1;
+	row->team_size = 2;
+	row->local_max = 4;
+	row->port = (unsigned short)NETWORK_PLAYLIST_PORT_HARDCORE;
+	snprintf(row->modes[0], sizeof(row->modes[0]), "slayer");
+	row->mode_count = 1;
+	row = &matchmaking.catalog.playlist[2];
+	snprintf(row->id, sizeof(row->id), "ranked");
+	snprintf(row->name, sizeof(row->name), "Ranked");
+	row->players = 8;
+	row->team_size = 1;
+	row->local_max = 4;
+	row->port = (unsigned short)NETWORK_PLAYLIST_PORT_RANKED;
+	row->ranked = 1;
+	snprintf(row->modes[0], sizeof(row->modes[0]), "slayer");
+	row->mode_count = 1;
+	matchmaking.catalog.count = 3;
+	matchmaking.catalog_ready = 1;
 }
 
 int matchmaking_catalog(struct matchmaking_catalog *catalog)
@@ -1818,6 +1835,7 @@ int matchmaking_catalog(struct matchmaking_catalog *catalog)
 	int result = 0;
 
 	pthread_mutex_lock(&matchmaking_lock);
+	catalog_fallback_locked();
 	if (matchmaking.catalog_ready)
 	{
 		*catalog = matchmaking.catalog;
@@ -2013,14 +2031,132 @@ int matchmaking_name_is_filler(const wchar_t *name)
 
 void matchmaking_find_game(void)
 {
+	char playlist[16];
+	int locals = 1;
+
 	if (rank_search_blocks())
 		return;
+	playlist[0] = 0;
 	pthread_mutex_lock(&matchmaking_lock);
 	if (matchmaking.queueing && !matchmaking.ready)
 	{
 		matchmaking.ready = 1;
 		matchmaking.party_mark++;
 	}
+	copy_short(playlist, (int)sizeof(playlist), matchmaking.playlist, 15);
+	locals = matchmaking.locals;
+	pthread_mutex_unlock(&matchmaking_lock);
+	if (playlist[0])
+		peer_mesh_search(playlist, locals);
+}
+
+void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, const char *invite,
+	const char *match)
+{
+	struct matchmaking_offer offer;
+
+	if (!playlist || !playlist[0])
+		return;
+	pthread_mutex_lock(&matchmaking_lock);
+	if (!matchmaking.queueing || !matchmaking.ready)
+	{
+		pthread_mutex_unlock(&matchmaking_lock);
+		return;
+	}
+	if (!host && (matchmaking.offer.role == MATCHMAKING_ROLE_JOIN ||
+		matchmaking.offer.role == MATCHMAKING_ROLE_SERVER) && matchmaking.offer.invite[0])
+	{
+		pthread_mutex_unlock(&matchmaking_lock);
+		return;
+	}
+	offer_clear(&offer);
+	offer.role = host ? MATCHMAKING_ROLE_HOST : MATCHMAKING_ROLE_SERVER;
+	offer.phase = MATCHMAKING_PHASE_SEARCH;
+	offer.port = port ? port : playlist_port(playlist);
+	copy_short(offer.playlist, (int)sizeof(offer.playlist), playlist, 15);
+	copy_short(offer.name, (int)sizeof(offer.name), !strcmp(playlist, "hardcore") ? "2v2" :
+		!strcmp(playlist, "ranked") ? "Ranked" : "FFA", 31);
+	if (invite && invite[0])
+		copy_short(offer.invite, (int)sizeof(offer.invite), invite, 159);
+	if (match && match[0])
+		copy_short(offer.match, (int)sizeof(offer.match), match, 39);
+	{
+		unsigned char match_bytes[16];
+		int index;
+		int humans;
+
+		memset(match_bytes, 0, sizeof(match_bytes));
+		for (index = 0; match && match[index] && match[index + 1] && index / 2 < 16; index += 2)
+		{
+			int high = match[index];
+			int low = match[index + 1];
+
+			high = high >= 'a' ? high - 'a' + 10 : high >= 'A' ? high - 'A' + 10 : high - '0';
+			low = low >= 'a' ? low - 'a' + 10 : low >= 'A' ? low - 'A' + 10 : low - '0';
+			if (high < 0 || high > 15 || low < 0 || low > 15)
+				break;
+			match_bytes[index / 2] = (unsigned char)((high << 4) | low);
+		}
+		copy_short(offer.map, (int)sizeof(offer.map), mesh_map_for(match_bytes), 31);
+		rules_default(&offer.rules, offer.playlist, offer.map);
+		mesh_loadout(match_bytes, offer.playlist, &offer.rules.primary, &offer.rules.secondary);
+		humans = peer_mesh_party_size();
+		if (humans < 1)
+			humans = 1;
+		offer.joined = humans;
+		offer.wait_seconds = mesh_wait_seconds(offer.playlist, humans, players_for(offer.playlist),
+			peer_mesh_search_seconds());
+	}
+	offer.players = players_for(offer.playlist);
+	offer.teams = offer.rules.teams;
+	offer.team_size = offer.teams ? 2 : 1;
+	offer.local_max = 4;
+	offer.bots = 0;
+	{
+		struct rank_account account;
+
+		rank_account_get(&account);
+		if (matchmaking.name[0])
+		{
+			char remote[8][12];
+			int remote_count = 0;
+			int remote_index;
+
+			copy_short(offer.names[0], (int)sizeof(offer.names[0]), matchmaking.name, 11);
+			offer.name_count = 1;
+			/* Party 0 is the host. A free-for-all still lists that name, and
+			each other machine, so the start waits until those players are
+			actually in the lobby. */
+			offer.name_party[0] = 0;
+			offer.party_count = 1;
+			remote_count = peer_mesh_party_names(remote, 8);
+			for (remote_index = 0; remote_index < remote_count && offer.name_count < MATCHMAKING_LOBBY_NAMES;
+				remote_index++)
+			{
+				copy_short(offer.names[offer.name_count], (int)sizeof(offer.names[0]), remote[remote_index], 11);
+				offer.name_party[offer.name_count] = offer.teams ? offer.name_count : 0;
+				offer.name_count++;
+				offer.party_count = offer.name_count;
+			}
+		}
+		if (account.account[0] && account.core[0])
+		{
+			struct matchmaking_card *card = &offer.cards[0];
+
+			copy_short(card->name, (int)sizeof(card->name), matchmaking.name, 11);
+			copy_short(card->account, (int)sizeof(card->account), account.account, 47);
+			copy_short(card->core, (int)sizeof(card->core), account.core, 23);
+			card->foreground = account.foreground;
+			card->background = account.background;
+			card->foreground_color = account.foreground_color;
+			card->background_color = account.background_color;
+			card->games = account.games;
+			card->level = account.level;
+			offer.card_count = 1;
+		}
+	}
+	matchmaking.offer = offer;
+	matchmaking.offer_ready = 1;
 	pthread_mutex_unlock(&matchmaking_lock);
 }
 
@@ -2099,6 +2235,7 @@ void matchmaking_leave(void)
 			matchmaking.want_clear = 1;
 	}
 	pthread_mutex_unlock(&matchmaking_lock);
+	peer_mesh_stop();
 }
 
 void matchmaking_reset(void)
@@ -2122,6 +2259,7 @@ void matchmaking_reset(void)
 	pthread_mutex_unlock(&matchmaking_lock);
 	screen_party_clear();
 	rank_search_clear();
+	peer_mesh_stop();
 }
 
 void matchmaking_stop(void)
@@ -2148,6 +2286,7 @@ void matchmaking_stop(void)
 	matchmaking.committed = 1;
 	matchmaking.search++;
 	pthread_mutex_unlock(&matchmaking_lock);
+	peer_mesh_stop();
 	note = rank_match_begin(offer.match, offer.playlist, offer.teams);
 	if (note)
 	{
@@ -2224,12 +2363,8 @@ void matchmaking_party_offer(struct matchmaking_offer *offer, const struct match
 	copy_short(offer->name, sizeof(offer->name), row->name[0] ? row->name : row->id, 31);
 	copy_short(offer->map, sizeof(offer->map), "chillout", 31);
 	port = port_ok(row->port) ? row->port : 0;
-	if (!port && !strcmp(row->id, "ffa"))
-		port = 5161;
-	else if (!port && !strcmp(row->id, "hardcore"))
-		port = 5162;
-	else if (!port && !strcmp(row->id, "objective"))
-		port = 5160;
+	if (!port)
+		port = playlist_port(row->id);
 	offer->port = port;
 	offer->players = row->players > 1 ? row->players : players_for(row->id);
 	offer->teams = row->teams;
@@ -2270,6 +2405,8 @@ void matchmaking_yield_to_invite(const char *text)
 		screen_party_clear();
 	}
 	pthread_mutex_unlock(&matchmaking_lock);
+	if (yield)
+		peer_mesh_stop();
 }
 
 void matchmaking_commit_host(const char *playlist, unsigned short port)
@@ -2308,6 +2445,8 @@ int matchmaking_link(void)
 	pthread_mutex_lock(&matchmaking_lock);
 	state = matchmaking.link;
 	pthread_mutex_unlock(&matchmaking_lock);
+	if (peer_mesh_ready())
+		return 1;
 	return state;
 }
 
@@ -2408,12 +2547,14 @@ static int name_listed_in_party(const struct matchmaking_offer *offer, const wch
 	return 0;
 }
 
-int matchmaking_join_team(const wchar_t *name, int host_local)
+int matchmaking_listed_team(const wchar_t *name, int host_local, int *listed)
 {
 	struct matchmaking_offer offer;
 	char host_name[12];
 	int index;
 
+	if (listed)
+		*listed = 0;
 	if (!matchmaking_game_port())
 		return -1;
 	pthread_mutex_lock(&matchmaking_lock);
@@ -2425,10 +2566,18 @@ int matchmaking_join_team(const wchar_t *name, int host_local)
 		return -1;
 	/* no parties listed: the people in this hosted game share a team */
 	if (offer.party_count <= 0)
+	{
+		if (listed)
+			*listed = 1;
 		return 0;
+	}
 	/* the host's own player is team 0, even when a remote human has the same name */
 	if (host_local)
+	{
+		if (listed)
+			*listed = 1;
 		return 0;
+	}
 	/* a filler name is unique and belongs to the party that lists it */
 	if (matchmaking_name_is_filler(name))
 	{
@@ -2436,6 +2585,8 @@ int matchmaking_join_team(const wchar_t *name, int host_local)
 		{
 			if (!offer_name_matches(name, offer.names[index]))
 				continue;
+			if (listed)
+				*listed = 1;
 			return party_team(&offer, offer.name_party[index]);
 		}
 	}
@@ -2444,15 +2595,45 @@ int matchmaking_join_team(const wchar_t *name, int host_local)
 	would put every copy, and the filler beside the first, on team 0. */
 	if (host_name[0] && offer_name_matches(name, host_name) &&
 		name_listed_in_party(&offer, name, 1))
+	{
+		if (listed)
+			*listed = 1;
 		return 1;
+	}
 	for (index = 0; index < offer.name_count && index < MATCHMAKING_LOBBY_NAMES; index++)
 	{
 		if (!offer_name_matches(name, offer.names[index]))
 			continue;
+		if (listed)
+			*listed = 1;
 		return party_team(&offer, offer.name_party[index]);
 	}
 	/* not listed: this human joined the link and stays on the host's team. */
 	return 0;
+}
+
+int matchmaking_join_team(const wchar_t *name, int host_local)
+{
+	return matchmaking_listed_team(name, host_local, NULL);
+}
+
+int matchmaking_team_for_machine(int machine)
+{
+	struct matchmaking_offer offer;
+	unsigned char key[32];
+	int party;
+
+	if (machine < 0 || !peer_mesh_machine_key(machine, key))
+		return -1;
+	party = peer_mesh_party_for_key(key);
+	if (party < 0 || !matchmaking_game_port())
+		return -1;
+	pthread_mutex_lock(&matchmaking_lock);
+	offer = matchmaking.offer;
+	pthread_mutex_unlock(&matchmaking_lock);
+	if (!offer.teams)
+		return -1;
+	return party_team(&offer, party);
 }
 
 int matchmaking_may_count(int player_count, int maximum_players)

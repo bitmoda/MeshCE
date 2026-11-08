@@ -478,8 +478,8 @@ static const struct config_setting config_settings[] =
 		"single quotes: 'C:\\Games\\Halo'." },
 	{ "paths.saves", _config_string, "\"\"", "HALO_SAVE_ROOT", _environment_value, _platform_desktop,
 		"Where saved games and profiles go; empty for the usual place\n"
-		"(~/.local/share/halo-linux, or %APPDATA%\\halo on Windows, or\n"
-		"~/Library/Application Support/OpenCE on Mac)." },
+		"(~/.local/share/opence-mesh, or %APPDATA%\\OpenCE Mesh on Windows, or\n"
+		"~/Library/Application Support/OpenCE Mesh on Mac)." },
 	{ "paths.custom_edition", _config_string, "\"\"", "HALO_CUSTOM_EDITION_ROOT", _environment_value, _platform_desktop,
 		"A Halo Custom Edition install whose maps folder is looked in after the\n"
 		"custom_maps folder for Custom Edition maps and their bitmaps.map,\n"
@@ -547,10 +547,6 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"Hosting: the minutes a player must have played on this server to start\n"
 		"a vote to kick (0 to 60); to vote, 2 minutes or this, the less." },
-	{ "network.votekick_ban_minutes", _config_integer, "30", "HALO_NET_VOTEKICK_BAN_MINUTES", _environment_value,
-		_platform_all,
-		"Hosting: the minutes a player kicked by a vote cannot join again (1 to\n"
-		"1440)." },
 	{ "network.map_share", _config_boolean, "true", "HALO_NET_MAP_SHARE", _environment_value, _platform_all,
 		"Hosting: send a player who joins without the game's Custom Edition map\n"
 		"the map (from custom_maps), and the resource maps it needs that the\n"

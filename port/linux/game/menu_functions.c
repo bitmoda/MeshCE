@@ -1299,7 +1299,7 @@ static void profile_description_fix(struct widget_instance *list)
 	picture = text->next;
 	if (!strcmp(list->focused_child->name, "player_id_profile_item"))
 	{
-		label_set(text, L"Emblem, colors, and Core ID.");
+		label_set(text, L"Emblem, colors, and Mesh ID.");
 		visible_set(picture, FALSE);
 		return;
 	}
@@ -4750,7 +4750,7 @@ static void multiplayer_mode_set(struct widget_instance *widget)
 		strstr(name, "create_inter") ? _multiplayer_mode_host_internet :
 		strstr(name, "create_lan") ? _multiplayer_mode_host_lan :
 		strstr(name, "join_lan") ? _multiplayer_mode_lan :
-		strstr(name, "join_direct") ? _multiplayer_mode_direct_link : _multiplayer_mode_server_browser;
+		strstr(name, "join_direct") ? _multiplayer_mode_direct_link : _multiplayer_mode_direct_link;
 }
 
 /* player 1's profile for the controller's player in a network game */
@@ -6052,7 +6052,7 @@ static void rank_id_update(struct widget_instance *screen)
 		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Shape color. %d of %d.", index, count);
 	}
 	else if (!strcmp(focus_name, "rank_core"))
-		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Core ID is assigned by the server.");
+		usnprintf(text, ROW_TEXT_LENGTH - 1, L"Mesh ID comes from this install.");
 	else
 		usnprintf(text, ROW_TEXT_LENGTH - 1, L"OK keeps this emblem. Cancel puts it back.");
 	text[ROW_TEXT_LENGTH - 1] = 0;
@@ -9344,7 +9344,7 @@ static void lobby_update(struct widget_instance *list)
 			size_t length;
 
 			if (rank_search_blocks())
-				usnprintf(status, NUMBEROF(status) - 1, L"Core ID is still arriving.");
+				usnprintf(status, NUMBEROF(status) - 1, L"Mesh ID is still arriving.");
 			else if (!matchmaking_is_ready() || offer.phase == MATCHMAKING_PHASE_PARTY)
 				usnprintf(status, NUMBEROF(status) - 1, L"Find Game when ready");
 			else if (offer.wait_seconds > 0)
@@ -9381,7 +9381,7 @@ static void lobby_update(struct widget_instance *list)
 			usnprintf(text, NUMBEROF(text) - 1, L"%s\r\n%s\r\n%d of %d players\r\n\r\n%s", gametype,
 				engine_names[PIN(game->variant.game_engine_index, 0, 5)], lobby_player_count, game->maximum_players,
 				seconds > 0 ? L"Starting in:" : party && matchmaking_is_ready() ? L"Looking for a match" :
-				party && rank_search_blocks() ? L"Core ID is still arriving." :
+				party && rank_search_blocks() ? L"Mesh ID is still arriving." :
 				party ? L"Find Game when ready" : game->machine_count < 2 ? L"Waiting for players" : L"");
 			text[NUMBEROF(text) - 1] = 0;
 			if (seconds > 0)
@@ -12125,12 +12125,24 @@ static void mm_follow_offer(void)
 	mm_followed_rules = offer.rules;
 }
 
+static struct advertised_game *mm_invited_game(char const *invite);
+
 static struct advertised_game *mm_peer_game(void)
 {
 	void *client = global_network_game_client_get();
 	struct advertised_game *games = client ? network_game_client_get_available_games(client) : NULL;
+	struct matchmaking_offer offer;
+	struct advertised_game *named;
 	short index;
 
+	/* the mesh names the host. a game heard on the local network is that
+	host when its address carries the same id, with or without the old brokers. */
+	if (matchmaking_offer_copy(&offer) && offer.invite[0])
+	{
+		named = mm_invited_game(offer.invite);
+		if (named)
+			return named;
+	}
 	if (!games)
 		return NULL;
 	for (index = 0; index < MAXIMUM_ADVERTISED_GAMES; index++)
@@ -12161,8 +12173,6 @@ static struct advertised_game *mm_invited_game(char const *invite)
 			continue;
 		if (memcmp(game->xnaddr + 2, host, sizeof(host)) != 0)
 			continue;
-		if (!game_from_peer(game))
-			continue;
 		return game;
 	}
 	return NULL;
@@ -12178,7 +12188,8 @@ static void mm_invite_with_port(char *out, int size, char const *invite, unsigne
 	out[0] = 0;
 	if (!invite || !invite[0])
 		return;
-	if (port > 0 && port < 65536 && port != 5150 && port != 5151 && !strstr(invite, "port="))
+	if (port > 0 && port < 65536 && port != 5150 && port != 5151 &&
+		port != 5160 && port != 5161 && port != 5162 && !strstr(invite, "port="))
 		snprintf(out, (size_t)size, "%s?port=%u", invite, (unsigned)port);
 	else
 		snprintf(out, (size_t)size, "%s", invite);
@@ -12200,7 +12211,7 @@ static unsigned short mm_link_port(char const *text)
 		if (port >= 65536)
 			return 0;
 	}
-	if (port == 0 || port == 5150 || port == 5151)
+	if (port == 0 || port == 5150 || port == 5151 || port == 5160 || port == 5161 || port == 5162)
 		return 0;
 	return (unsigned short)port;
 }
@@ -12259,7 +12270,8 @@ static unsigned short mm_accept_port(void)
 {
 	unsigned short port = 0;
 
-	if (p2p_hosting_port(&port) && port > 0 && port < 65536 && port != 5150 && port != 5151)
+	if (p2p_hosting_port(&port) && port > 0 && port < 65536 && port != 5150 && port != 5151 &&
+		port != 5160 && port != 5161 && port != 5162)
 		return port;
 	return matchmaking_game_port();
 }
@@ -12873,8 +12885,9 @@ static boolean mm_begin_host(struct widget_instance *widget, struct event_record
 {
 	char build[0x20];
 	wchar_t name[16];
-	const char *title = !strcmp(mm_menu.offer.playlist, "ffa") ? "CCE FFA" :
-		!strcmp(mm_menu.offer.playlist, "hardcore") ? "CCE Hardcore" :
+	const char *title = !strcmp(mm_menu.offer.playlist, "ffa") ? "FFA" :
+		!strcmp(mm_menu.offer.playlist, "hardcore") ? "2v2" :
+		!strcmp(mm_menu.offer.playlist, "ranked") ? "Ranked" :
 		mm_menu.offer.name[0] ? mm_menu.offer.name : "Match";
 
 	if (!mm_menu.offer.map[0] || !mm_menu.offer.port)

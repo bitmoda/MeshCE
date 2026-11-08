@@ -154,6 +154,10 @@ void matchmaking_set_players(int players);
 int matchmaking_name_is_filler(const wchar_t *name);
 /* Find Game: ready becomes true and publishing continues. */
 void matchmaking_find_game(void);
+/* the peer mesh named this machine host, or gave it an invite to join.
+port 0 uses the playlist's port. match may be empty. */
+void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, const char *invite,
+	const char *match);
 /* 1 while this machine is publishing a queue */
 int matchmaking_queue_active(void);
 /* 1 after Find Game */
@@ -208,8 +212,13 @@ own player and is team 0. a filler name, one matchmaking_name_is_filler
 already recognizes, takes the party that lists it. a remote human with the
 host's name is team 1 when parties[1] lists that name too. a human in
 neither list joined the link and stays on the host's team. with no parties,
-every human in this game shares team 0. */
+every human in this game shares team 0. listed is 1 when this name is one
+the offer named, including the host's own players. */
+int matchmaking_listed_team(const wchar_t *name, int host_local, int *listed);
 int matchmaking_join_team(const wchar_t *name, int host_local);
+/* 0 or 1 when this game machine's key is one of the search parties. -1 when
+the id has not arrived, or this is not a team game. */
+int matchmaking_team_for_machine(int machine);
 /* 1 when a name in the offer's parties has no matching player yet. the same
 name listed twice needs two players. */
 int matchmaking_listed_absent(const wchar_t *const *names, int count);

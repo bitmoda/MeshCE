@@ -8,3 +8,9 @@ host_sdl_audio_device_count
 host_sdl_audio_device_name
 host_sdl_audio_device_id
 host_sdl_audio_stream_device_name
+# The peer id's seed, sealed to the secure element. Other hosts have no such call.
+host_peer_wrap
+host_peer_unwrap
+host_peer_public
+host_peer_sign
+host_peer_verify

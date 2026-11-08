@@ -14,6 +14,7 @@
     "ws2_32",
     "iphlpapi",
     "bcrypt",
+    "ncrypt",
     "winmm",
     "user32",
     "advapi32",

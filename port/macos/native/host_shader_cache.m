@@ -6,7 +6,7 @@
 void halo_update_discard_shader_caches(const char *save_root)
 {
     NSString *root = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject
-        stringByAppendingPathComponent:@"OpenCE/ShaderCache-v1"];
+        stringByAppendingPathComponent:@"OpenCE Mesh/ShaderCache-v1"];
 
     [NSFileManager.defaultManager removeItemAtPath:root error:nil];
     if (!save_root || !save_root[0])

@@ -427,7 +427,8 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         f"-isystem {MUSL_DIR}/include",
     ]
     guest_abi = " ".join(GUEST_ABI_FLAGS + configuration_defines(sln) +
-                         (["-DHALO_MACOS_NATIVE_METAL=1"] if native_metal else []))
+                         (["-DHALO_MACOS_NATIVE_METAL=1"] if native_metal else []) +
+                         (["-DHALO_MACOS_GUEST=1"] if macos and not ios else []))
     guest_code = " ".join(GUEST_CODE_FLAGS)
     tool_implicit = [Path("tools/android_asm_convert.py"), *generated_headers]
     if macos or ios:

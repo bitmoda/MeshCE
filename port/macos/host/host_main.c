@@ -30,26 +30,21 @@ static int create_directories(const char *path) {
         }
     return mkdir(buffer, 0755) && errno != EEXIST ? -1 : 0;
 }
-/* Internet play reads brokers.txt beside config.toml. The app bundle is the
-source; each launch replaces the copy in the saves folder. */
+/* The peer mesh finds players. The saves folder gets an empty list so a
+later read cannot fall back to the public brokers. */
 static void host_install_brokers(const char *resources, const char *saves) {
-    char source_path[4096], destination_path[4096], buffer[4096];
-    snprintf(source_path, sizeof(source_path), "%s/brokers.txt", resources);
+    char destination_path[4096];
+    static const char note[] =
+        "# This client finds players on its own peer mesh.\n"
+        "# It does not use the public brokers.\n";
+    FILE *destination;
+
+    (void)resources;
     snprintf(destination_path, sizeof(destination_path), "%s/brokers.txt", saves);
-    FILE *source = fopen(source_path, "rb");
-    if (!source)
+    destination = fopen(destination_path, "wb");
+    if (!destination)
         return;
-    FILE *destination = fopen(destination_path, "wb");
-    if (!destination) {
-        fclose(source);
-        return;
-    }
-    size_t count;
-    while ((count = fread(buffer, 1, sizeof(buffer), source)) > 0) {
-        if (fwrite(buffer, 1, count, destination) != count)
-            break;
-    }
-    fclose(source);
+    fwrite(note, 1, sizeof(note) - 1, destination);
     fclose(destination);
 }
 void host_logf(int priority, const char *format, ...) {
@@ -177,7 +172,7 @@ int main(int argc, char **argv) {
     if (!home)
         host_fatal("HOME is not set");
     snprintf(default_saves, sizeof(default_saves),
-             "%s/Library/Application Support/OpenCE", home);
+             "%s/Library/Application Support/OpenCE Mesh", home);
     const char *saves = getenv("HALO_SAVE_ROOT");
     if (!saves)
         saves = !image_argument ? default_saves : "build/macos/saves";

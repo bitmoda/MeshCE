@@ -1767,6 +1767,9 @@ static void brokers_list(char *text, size_t size)
 	int comment = 0;
 
 	text[0] = 0;
+	(void)size;
+	platform_log("Internet play: this client does not use the old brokers");
+	return;
 #ifdef HALO_WEB
 	{
 		/* a page reaches brokers over WebSockets alone (web_net.c): the

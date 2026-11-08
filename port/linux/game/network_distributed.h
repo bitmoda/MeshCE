@@ -178,6 +178,12 @@ enum
 	allow mods. the network version stays as it is. */
 	_distributed_message_mods_policy = 103,
 	_distributed_message_mods_ack = 104,
+	/* this machine's peer id (network_peer.c), signed, so a vote can name
+	that id. the host sends each client's id on. a build that does not know
+	the message drops it. the network version stays as it is. */
+	_distributed_message_peer_id = 105,
+	/* a signed report against the peer id of the player being voted on. */
+	_distributed_message_peer_report = 106,
 
 	NUMBER_OF_DISTRIBUTED_MESSAGES
 };
@@ -368,6 +374,23 @@ word network_votekick_request_entry_size(void);
 /* (a client) the host's count */
 void network_votekick_handle_status(void const *entries);
 word network_votekick_status_entry_size(void);
+
+void network_peer_new_game(void);
+void network_peer_host_tick(void);
+void network_peer_client_tick(void);
+void network_peer_handle_id(long machine_index, void const *entries, int from_stream);
+void network_peer_handle_report(long machine_index, void const *entries, int from_stream);
+word network_peer_id_entry_size(void);
+word network_peer_report_entry_size(void);
+void network_peer_vote(short player_index);
+void network_peer_consider(long target_machine, int players);
+/* the vote has the count that removes the player; the ban waits for the
+reports to reach that same count */
+void network_peer_ban_due(long target_machine, int players);
+/* a kick vote ended short of the count that removes the player */
+void network_peer_remember_target(long target_machine);
+void network_peer_forget_target(void);
+void network_peer_publish_strikes(long target_machine, int players);
 
 /* ---------- prototypes/NETWORK_CHAT.C */
 
