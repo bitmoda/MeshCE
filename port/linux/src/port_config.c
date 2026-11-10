@@ -177,11 +177,14 @@ static const struct config_setting config_settings[] =
 		"whose loc.map is in custom_maps (as that edition shows them; English\n"
 		"without one), \"english\" for English. The port's own lines are English." },
 	{ "display.player_names", _config_string, "\"all\"", "HALO_PLAYER_NAMES", _environment_value, _platform_all,
-		"Kept so an older config file still loads. Names are not drawn above\n"
-		"players. Teammates use the game's marker." },
+		"In multiplayer, whose names are drawn above their heads: \"all\",\n"
+		"\"allies\", \"enemies\" or \"none\". A teammate's is drawn above the\n"
+		"game's marker. An enemy's shows only within the motion sensor's reach,\n"
+		"in sight and not camouflaged, and only when the tracker would show\n"
+		"that player." },
 	{ "display.player_name_scale", _config_real, "1.0", "HALO_PLAYER_NAME_SCALE", _environment_value, _platform_all,
-		"Kept so an older config file still loads. Names are not drawn above\n"
-		"players." },
+		"Kept so an older config still loads. Names are drawn at the size of\n"
+		"the name at the top of the screen." },
 	{ "display.match_timer", _config_string, "\"off\"", "HALO_MATCH_TIMER", _environment_value, _platform_all,
 		"The match clock at the bottom right in multiplayer: \"off\", \"on\", or\n"
 		"\"voice\". On counts up from the game's first tick. Voice plays this\n"

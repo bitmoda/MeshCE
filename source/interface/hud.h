@@ -136,10 +136,15 @@ void hud_play_sound(
 	word *played_flags,
 	short maximum_sound_count); /* port: what sound_indices holds */
 
-/* port: the voice list's name colour, the HUD's own text (hud.c) */
+/* port: a name's colour, an ally's the HUD's text and an enemy's red (hud.c) */
 void hud_player_name_color(
 	boolean ally,
 	union real_argb_color *color);
+
+/* port: names above other players, drawn with the name at the top of the
+screen (game_engine_post_rasterize_in_game, and split-screen campaign) */
+void hud_draw_overhead_names(
+	void);
 
 /* ---------- globals */
 

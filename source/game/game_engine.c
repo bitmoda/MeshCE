@@ -4026,6 +4026,9 @@ static void game_engine_post_rasterize_in_game(
 
 	if (game_engine && player)
 		internal_rasterize_target_name(player_index);
+	/* port: the same names, above the other players, in a match and in
+	network co-op. this is where the name at the top of the screen is drawn */
+	hud_draw_overhead_names();
 
 	gamepad = input_get_gamepad_state(local_player_index);
 	fade = game_engine_globals.hud_message_timers[local_player_index];
