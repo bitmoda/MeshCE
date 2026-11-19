@@ -8,9 +8,9 @@
   <img src="port/assets/icon/meshce-icon.png" alt="MeshCE" width="384">
 </p>
 <p align="center">
-  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-75/OpenCE-macos-arm64.dmg"><img src="https://img.shields.io/badge/Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download MeshCE for Mac"></a>
-  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-75/halo-windows-release.zip"><img src="https://img.shields.io/badge/Windows-download-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download MeshCE for Windows"></a>
-  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-75/halo-linux-release.zip"><img src="https://img.shields.io/badge/Linux-download-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download MeshCE for Linux"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-76/MeshCE-macos-arm64.dmg"><img src="https://img.shields.io/badge/Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download MeshCE for Mac"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-76/halo-windows-release.zip"><img src="https://img.shields.io/badge/Windows-download-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download MeshCE for Windows"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-76/halo-linux-release.zip"><img src="https://img.shields.io/badge/Linux-download-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download MeshCE for Linux"></a>
 </p>
 
 <p align="center">
@@ -42,7 +42,7 @@ You can also play with up to 128 players, run campaign co-op online, and host a 
 
 ## Download
 
-The Mac button downloads build 75 (`OpenCE-macos-arm64.dmg`). The Windows button downloads build 75 (`halo-windows-release.zip`). The Linux button downloads build 75 (`halo-linux-release.zip`). Each system is published on its own. Those three are on the [releases page](https://github.com/bitmoda/MeshCE/releases).
+The Mac button downloads build 76 (`MeshCE-macos-arm64.dmg`). The Windows button downloads build 76 (`halo-windows-release.zip`). The Linux button downloads build 76 (`halo-linux-release.zip`). Each system is published on its own. Those three are on the [releases page](https://github.com/bitmoda/MeshCE/releases).
 
 | System | Download this | Then |
 | --- | --- | --- |
@@ -81,9 +81,19 @@ Settings live in `config.toml` next to `halo`. Saves go in `~/.local/share/meshc
 
 ### Updates
 
-On Mac, the app checks this releases page for a newer disk image and asks before installing it.
+On Mac, a copy from build 76 onward checks this releases page for a newer disk image and asks before installing it. A Mac on build 75 stays where it is until you download the disk image above.
 
 On Windows and Linux, download a newer zip from the same page and replace the program files. Leave maps, saves, and `config.toml` where they are. If the game offers an update, **Yes** replaces the program files and keeps the previous copies with a `.old` name until the next start. **No** asks again next time. **Do not ask again** writes that choice into `config.toml`. A build you compile yourself has no build number and does not ask.
+
+## OpenCE for Mac
+
+OpenCE on Apple Silicon is a separate release. It keeps the OpenCE menus and gameplay. Its network protocol is 44. MeshCE's updater does not install it, and the OpenCE updater does not install MeshCE.
+
+<p align="center">
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/opence-build-1/opence-macos-arm64.dmg"><img src="https://img.shields.io/badge/OpenCE%20Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download OpenCE for Mac"></a>
+</p>
+
+The button downloads `opence-macos-arm64.dmg` from `opence-build-1`. Open the disk image and drag **OpenCE.app** into Applications. It is for Apple Silicon and macOS 26 or later. The app is ad hoc signed. If macOS blocks the first open, allow it in **System Settings**, under **Privacy & Security**. Saves go in `~/Library/Application Support/OpenCE`.
 
 ## Your own copy
 
