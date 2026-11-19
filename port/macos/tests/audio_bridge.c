@@ -19,6 +19,7 @@ void host_perf_frame(double swap_ms) { (void)swap_ms; }
 void host_menu_window_changed(void) {}
 void host_menu_style_window(void *window) { (void)window; }
 int host_menu_set_fullscreen(int enabled) { (void)enabled; return 0; }
+void host_menu_note_background(int hidden) { (void)hidden; }
 
 void host_logf(int priority, const char *format, ...) {
     (void)priority;
@@ -87,8 +88,8 @@ int main(void) {
     assert(strcmp(text, invite) == 0);
     assert(unlink(path) == 0 && rmdir(directory) == 0);
     puts("SDL opened-invite event delivered without a native pointer in the guest");
-    /* Command-W must not turn a movement key into a quit, while the
-       window's close button and Command-Q still deliver a quit event. */
+    /* Command-W must not turn a movement key into a close. The window
+       close button hides the game. Command-Q still delivers a quit. */
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     SDL_Event command = {.type = SDL_EVENT_KEY_DOWN};
     command.key.scancode = SDL_SCANCODE_LGUI;
@@ -109,8 +110,8 @@ int main(void) {
         suppressed += guest_event.type == 0;
         quits += guest_event.type == SDL_EVENT_QUIT;
     }
-    assert(suppressed == 1 && quits == 2);
-    puts("Command-W ignored; window close and Command-Q still quit");
+    assert(suppressed == 2 && quits == 1);
+    puts("Command-W ignored; window close hides the game; Command-Q still quits");
     SDL_AudioSpec spec = {.format = SDL_AUDIO_F32, .channels = 2, .freq = 48000};
     uint32_t stream = host_sdl_open_audio_stream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, 1, 0);
     assert(stream);

@@ -35,6 +35,8 @@ struct rank_account
 void rank_account_bind(const char *directory, const char *name);
 int rank_account_bound(void);
 void rank_account_get(struct rank_account *out);
+/* keeps this install's Mesh ID on the bound profile. The same ID is left as it is. */
+void rank_account_remember_mesh(const char *mesh_id);
 /* field 0 foreground, 1 background, 2 sprite color, 3 shape color */
 void rank_emblem_step(int field, int delta);
 void rank_emblem_set(int field, int value);
@@ -81,6 +83,8 @@ void rank_kick_published(void);
 
 /* 1 when this match id is new and the caller should note its cards. */
 int rank_match_begin(const char *match, const char *playlist, int teams);
+/* the game now starting is not the open mesh match. an unsent scoreboard is dropped. */
+void rank_match_close(void);
 void rank_match_note(const char *name, const char *account, int level);
 int rank_level_named(const char *name);
 void rank_account_for_name(const char *name, char *account, int size);

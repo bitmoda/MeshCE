@@ -349,6 +349,7 @@ symbols in this file:
 #include "networking/network_client_manager.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
+#include "network_votekick.h"
 #include "networking/network_messages.h"
 #include "saved games/player_profile.h"
 #include "saved games/playlist_profile.h"
@@ -2056,6 +2057,7 @@ static void netgame_prejoin_players(
 		for (state_or_index.index = 0; (short)state_or_index.index < 4; state_or_index.index++)
 		{
 			if (local_player_wants_to_join[(short)state_or_index.index] &&
+				!network_votekick_local_blocked((short)state_or_index.index) &&
 				!network_game_client_add_player(client, (short)state_or_index.index))
 			{
 				network_event("failed to send join request");
@@ -3309,12 +3311,12 @@ static void variant_profile_update_cache_for_nwide_list(
 
 #ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 /* The card has 256 UTF-16 characters and room for one more small-ui line.
-Keep the indication generic as additional OpenCE options are introduced. */
+Keep the indication generic as additional MeshCE options are introduced. */
 static void playlist_profile_append_performance_status(
 	wchar_t *description,
 	struct playlist_profile const *profile)
 {
-	static wchar_t const status[] = L"\r\nOpenCE options active";
+	static wchar_t const status[] = L"\r\nMeshCE options active";
 	unsigned long length;
 	wchar_t const *suffix;
 	unsigned long suffix_length;

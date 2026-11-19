@@ -378,6 +378,9 @@ word network_votekick_status_entry_size(void);
 void network_peer_new_game(void);
 void network_peer_host_tick(void);
 void network_peer_client_tick(void);
+/* the lobby, before the match: the same ids, on the wall clock */
+void network_peer_lobby_tick(void);
+boolean network_peer_handles_message(word const *message, word size);
 void network_peer_handle_id(long machine_index, void const *entries, int from_stream);
 void network_peer_handle_report(long machine_index, void const *entries, int from_stream);
 word network_peer_id_entry_size(void);

@@ -59,6 +59,10 @@ boolean network_game_client_end_frame(
 	void);
 short network_game_client_get_local_machine_index(
 	void);
+/* The host's quit tick for that player, before this client's clock moves
+it. NONE when this client did not see that player's quit message. */
+long network_game_client_quit_tick(
+	long player_index);
 void network_game_client_local_player_quit(
 	short controller_index);
 long network_game_get_number_of_games_played(

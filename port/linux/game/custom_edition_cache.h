@@ -240,11 +240,6 @@ them either way. */
 boolean custom_edition_reordered_bitmaps_find(
 	byte *tag_cache,
 	unsigned long loaded_bytes);
-/* As custom_edition_reordered_bitmaps_find, in the loaded map's tags, which
-the validator has checked: for the bitmaps of mods (mod_bitmaps.c), Halo
-PC's on any map. FALSE after logging why it cannot. */
-boolean custom_edition_loaded_reordered_bitmaps_find(
-	void);
 /* The order (enum custom_edition_channel_order) Halo PC keeps the channels
 of bitmap `bitmap_index` of the tag `handle` names in, of those found. */
 short custom_edition_bitmap_channel_order(
@@ -269,20 +264,6 @@ boolean custom_edition_sounds_decode(
 	unsigned long loaded_bytes,
 	long decoded_offset,
 	unsigned long decoded_limit);
-/* The samples `data` (`data_bytes` of them) of a sound permutation of
-`compression` (16-bit PCM, little-endian or `big_endian`; Xbox ADPCM; Ogg
-Vorbis), `channels` channels at `rate`, encoded as Xbox ADPCM at
-`encoded_rate`: a buffer of the game's allocator of *encoded_bytes; NULL
-when they cannot be (mod_sounds.c) */
-byte *custom_edition_sounds_encode(
-	byte const *data,
-	long data_bytes,
-	short compression,
-	boolean big_endian,
-	long channels,
-	long rate,
-	long encoded_rate,
-	unsigned long *encoded_bytes);
 /* the bytes of the samples custom_edition_sounds_decode made */
 unsigned long custom_edition_sounds_decoded_bytes(
 	void);

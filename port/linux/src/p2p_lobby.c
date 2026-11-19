@@ -2,9 +2,9 @@
 P2P_LOBBY.C
 
 Internet play's public games (the server browser, Join Game > Server
-Browser): a public game's host publishes a signed listing of it through the
-signalling brokers (p2p_signal.c), and browsers gather the listings and join
-a game by the invite a listing holds, as an invite link would.
+Browser). This client does not publish a listing and does not gather one:
+there is no signalling broker. A game is joined from an invite link, or
+from the peer mesh. The listing format below is what an older host signed.
 
 The listing (network byte order) is signed with the host's Ed25519 key,
 whose X25519 form's hash is the invite's host part (p2p.c), so no one but
@@ -20,19 +20,14 @@ false details:
 	gametype's engine (1 each), the game's name,
 	map and gametype (a length byte, then up to 32, 32 and 24 characters of
 	printable ASCII), a stamp (8, reserved: zero), and the signature (64) of
-	"opence-lobby-1" and all before it. OpenCE signs the same listing with
+	"meshce-lobby-1" and all before it. OpenCE signs the same listing with
 	"hceu-lobby-1". Those are shown too, whatever network version they name,
 	so an OpenCE public game appears in this server browser. This build
-	signs its own listings with "opence-lobby-1". A dedicated server is
-	not on these brokers. The browser asks the master servers for those
-	(master_list.c) and shows each one whose host signed its listing.
+	signs its own listings with "meshce-lobby-1". This client does not send
+	that listing, and it does not ask a master server.
 
-Each host has a slot, hceu/3/lobby/s/<its key's hash in hex>: its listing,
-retained on every broker (and expiring there after LISTING_EXPIRY seconds
-on MQTT 5), and the broker's will (set at the connection, p2p_signal.c)
-clears it if the host vanishes. Browsers subscribe to every slot and ask the
-hosts to publish again (hceu/3/lobby/q). Brokers are other people's: what
-one deletes or keeps is no authority, so
+A slot name is hceu/3/lobby/s/<its key's hash in hex>. Nothing is published
+there. The steps below stay in memory on this machine:
 - a host publishes every REPUBLISH_INTERVAL, and sooner (at most once each
   TRIGGER_INTERVAL) when its game changes, when asked, and when its slot is
   heard to hold anything but its listing (cleared, another's, or an older
@@ -108,7 +103,7 @@ enum
 	RETAINED_WINDOW = 600,
 };
 
-static const char signature_label[] = "opence-lobby-1";
+static const char signature_label[] = "meshce-lobby-1";
 static const char opence_signature_label[] = "hceu-lobby-1";
 
 /* (p2p.h's sizes of a locked listing's are p2p_internal.h's) */

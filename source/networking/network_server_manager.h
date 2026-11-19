@@ -53,6 +53,28 @@ void network_game_generate_join_game_token(
 void network_game_server_kick_machine(
 	long machine_index,
 	boolean kept_out);
+/* machines that have a player in this lobby, one each. the host's own
+machine is included. */
+short network_game_server_seated_machines(
+	long *machines,
+	short maximum);
+/* the listen server's own players leave the lobby. the server stays up. */
+void network_game_server_drop_local_players(
+	void);
+/* humans seated in the host's game. bots are not counted. */
+int network_game_server_seated_human_count(
+	void);
+/* the host's own machine, or NONE when this process is not that host. */
+long network_game_server_local_machine_index(
+	void);
+/* whether that machine is the host's own. */
+boolean network_game_server_machine_is_local(
+	long machine_index);
+/* the names of one machine's players, for a vote notice. */
+void network_game_server_machine_player_names(
+	long machine_index,
+	char *names,
+	long names_size);
 /* The next game update the host will send. The match fade is counted from it. */
 long network_game_server_get_next_update_number(
 	void);

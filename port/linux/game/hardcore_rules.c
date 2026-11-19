@@ -651,6 +651,11 @@ boolean hardcore_rules_opening_hold(void)
 	return opening_hold ? TRUE : FALSE;
 }
 
+unsigned long hardcore_rules_opening_sweep_ms(void)
+{
+	return OPENING_RING_MS;
+}
+
 boolean hardcore_rules_opening_fading(void)
 {
 	return opening_fading ? TRUE : FALSE;

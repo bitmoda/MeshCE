@@ -14,6 +14,7 @@ import re
 import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,33 @@ from test_text_filter import censor, generated  # noqa: E402
 ASSETS = ROOT / "port" / "assets" / "text_filter"
 MAPS = ROOT / "assets" / "maps"
 ALL = ("1", "1", "1")
+TAG_BASE = 0x803A6000
+
+
+class MapTags:
+    """an Xbox map's tags (assets/maps: compressed after their header), read as the game has them in memory"""
+
+    def __init__(self, path: Path):
+        data = path.read_bytes()
+        data = data[:0x800] + zlib.decompress(data[0x800:])
+        offset, size = struct.unpack_from("<ii", data, 0x10)
+        self.tags = data[offset:offset + size]
+        instances, _, _, count = struct.unpack_from("<IiIi", self.tags, 0)
+        self.instances = {}
+        for index in range(count):
+            group, _, _, tag_index, name, definition, _, _ = struct.unpack_from("<4sIIiIIII", self.tags,
+                                                                                 instances - TAG_BASE + index * 0x20)
+            self.instances[tag_index] = (group[::-1], self.string(name), definition)
+
+    def string(self, address: int) -> str:
+        start = address - TAG_BASE
+        return self.tags[start:self.tags.index(b"\0", start)].decode()
+
+    def block(self, address: int, offset: int, size: int) -> list:
+        count, elements = struct.unpack_from("<iI", self.tags, address - TAG_BASE + offset)
+        return [(elements + size * index, self.tags[elements - TAG_BASE + size * index:][:size]) for index in range(count)]
+
+
 # the settings' defaults (port_config.c): slurs mild and worse, swearing strong and worse, insults off
 DEFAULTS = ("1", "2", "0")
 
@@ -110,7 +138,6 @@ def test_menus_hide_nothing(matcher):
 
 
 def map_texts(path):
-    from test_mods import TAG_BASE, MapTags
     tags = MapTags(path)
     texts = []
     for group, _, definition in tags.instances.values():

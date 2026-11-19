@@ -4736,10 +4736,16 @@ void network_distributed_handle_message(
 			distributed_handling_stream_message : !network_connection_last_read_was_unreliable());
 		return;
 	}
-	/* (none between games: loading, or in the menus) */
-	if (size < sizeof(header) || !game_in_progress())
+	/* a running game takes every message. the lobby's vote still arrives
+	after the match clock has stopped. */
+	if (size < sizeof(header))
 		return;
 	csmemcpy(&header, message, sizeof(header));
+	if (!game_in_progress() &&
+		header.type != _distributed_message_votekick &&
+		header.type != _distributed_message_votekick_status &&
+		header.type != _distributed_message_notice)
+		return;
 	/* a tick's messages in one: each as if it came alone */
 	if (header.type == _distributed_message_batch)
 	{

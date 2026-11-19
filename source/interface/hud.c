@@ -117,6 +117,7 @@ symbols in this file:
 #include "hardcore_views.h" /* port: a teammate pane draws that player's HUD */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
 #include "network_voice.h" /* port: a speaker beside a name */
+#include "rank_result.h" /* port: the Mesh ID after the gamertag */
 #include "port_config.h" /* port: display.player_names */
 #include "clips.h" /* port: the free camera leaves the watched player's HUD */
 #include "text/font_group.h"
@@ -1130,6 +1131,10 @@ static void hud_draw_player_name(
 	real saved_scale;
 	real saved_origin_x;
 	real saved_origin_y;
+	rectangle2d icon;
+	boolean speaking = FALSE;
+	int mesh_machine;
+	int mesh_local;
 
 	if (font_index == NONE)
 		return;
@@ -1190,15 +1195,15 @@ static void hud_draw_player_name(
 	rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
 	draw_string_set_draw_mode(font_index, NONE, 2, 8, &color);
 	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, name);
-	rasterizer_text_set_scale(saved_scale, saved_origin_x, saved_origin_y);
 	/* (talking in voice chat: the speaker just left of the name, centred on
-	its capitals, where they are drawn, scaled; fading with it) */
-	if (network_voice_machine_speaking(player->network_player_data.machine_index))
+	its capitals, where they are drawn; fading with it. measured before the
+	Mesh ID changes the draw mode) */
+	speaking = network_voice_machine_speaking(player->network_player_data.machine_index);
+	if (speaking)
 	{
 		struct font_header *font = font_definition_get(font_index);
 		rectangle2d text;
 		rectangle2d cursor;
-		rectangle2d icon;
 		short size = font ? (short)(font->ascending_height + font->descending_height) : 12;
 		short middle;
 
@@ -1208,8 +1213,13 @@ static void hud_draw_player_name(
 		icon.x0 = (short)(icon.x1 - size);
 		icon.y0 = (short)(middle - size / 2);
 		icon.y1 = (short)(icon.y0 + size);
-		network_voice_draw_icon(&icon, FALSE, color.alpha);
 	}
+	/* (the install's Mesh ID, smaller, just after the gamertag) */
+	rank_player_install(player, &mesh_machine, &mesh_local);
+	rank_draw_name_tail(&bounds, name, mesh_machine, mesh_local, font_index, &color, 0);
+	rasterizer_text_set_scale(saved_scale, saved_origin_x, saved_origin_y);
+	if (speaking)
+		network_voice_draw_icon(&icon, FALSE, color.alpha);
 
 	return;
 }

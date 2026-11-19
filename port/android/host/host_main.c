@@ -65,7 +65,7 @@ void host_fatal(const char *format, ...)
 	vsnprintf(message, sizeof(message), format, arguments);
 	va_end(arguments);
 	__android_log_write(ANDROID_LOG_FATAL, "halo", message);
-	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", message, NULL);
+	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MeshCE", message, NULL);
 	_exit(1);
 }
 
@@ -378,18 +378,6 @@ static void *game_main(void *unused)
 	}
 	time_zone(zone, sizeof(zone));
 	environment_set(&environment, "TZ", zone);
-	/* internet play's MQTT brokers (network.brokers_file): the APK's list,
-	written beside config.toml at each start, as a desktop update replaces
-	the file beside its game */
-	{
-		size_t brokers_size = 0;
-		void *brokers = SDL_LoadFile("brokers.txt", &brokers_size);
-
-		snprintf(path, sizeof(path), "%s/brokers.txt", data_root);
-		if (!brokers || !SDL_SaveFile(path, brokers, brokers_size))
-			host_logf(HOST_LOG_ERROR, "cannot write %s: %s", path, SDL_GetError());
-		SDL_free(brokers);
-	}
 	/* the match and campaign loading film, written into maps once */
 	{
 		char film_path[1024];

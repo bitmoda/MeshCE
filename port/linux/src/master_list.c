@@ -1,8 +1,8 @@
 /*
 MASTER_LIST.C
 
-The server browser asks OpenCE's master servers for their lists of dedicated
-servers (master_list.h, and OpenCE's docs/master_protocol.md). A list is
+The server browser asks MeshCE's master servers for their lists of dedicated
+servers (master_list.h, and MeshCE's docs/master_protocol.md). A list is
 taken only when the master's pinned key signed it, and each game in it is
 taken only when its host signed the listing, the same check a game heard on
 the brokers gets (p2p_lobby.c).
@@ -93,90 +93,6 @@ static int hex_digit(char character)
 	if (character >= 'A' && character <= 'F')
 		return character - 'A' + 10;
 	return -1;
-}
-
-static int master_url_allowed(const char *url)
-{
-	return !strncmp(url, "https://", 8);
-}
-
-static int master_keep(const char *url, const char *key, char (*urls)[URL_SIZE], unsigned char (*keys)[KEY_SIZE],
-	int index)
-{
-	int digit;
-
-	if (!master_url_allowed(url) || strlen(url) >= URL_SIZE || strncmp(key, "ed25519:", 8) ||
-		strlen(key) != 8 + 2 * KEY_SIZE)
-	{
-		return 0;
-	}
-	for (digit = 0; digit < KEY_SIZE; digit++)
-	{
-		int high = hex_digit(key[8 + 2 * digit]);
-		int low = hex_digit(key[8 + 2 * digit + 1]);
-
-		if (high < 0 || low < 0)
-			return 0;
-		keys[index][digit] = (unsigned char)(high << 4 | low);
-	}
-	snprintf(urls[index], URL_SIZE, "%s", url);
-	while (strlen(urls[index]) > 8 && urls[index][strlen(urls[index]) - 1] == '/')
-		urls[index][strlen(urls[index]) - 1] = 0;
-	return 1;
-}
-
-/* the official master, asked when masters.txt names none */
-static int read_defaults(char (*urls)[URL_SIZE], unsigned char (*keys)[KEY_SIZE], int maximum)
-{
-	static const char url[] = "https://master.opencommunityedition.com";
-	static const char key[] = "ed25519:89f4eda71229f11f3538679f49ef7fb0c2b407b380093f7f4fe02105b92225aa";
-
-	if (maximum < 1)
-		return 0;
-	return master_keep(url, key, urls, keys, 0);
-}
-
-static int read_file(char (*urls)[URL_SIZE], unsigned char (*keys)[KEY_SIZE], int maximum)
-{
-	const char *setting = config_string("network.masters_file");
-	char folder[1024];
-	char path[1200];
-	char *text;
-	const char *line;
-	size_t length;
-	int count = 0;
-
-	if (!setting || !setting[0])
-		return 0;
-	if (setting[0] == '/' || (setting[0] && setting[1] == ':'))
-	{
-		snprintf(path, sizeof(path), "%s", setting);
-	}
-	else
-	{
-		config_folder(folder, sizeof(folder));
-		snprintf(path, sizeof(path), "%s%s", folder, setting);
-	}
-	text = config_file_read(path, &length);
-	if (!text)
-		return 0;
-	for (line = text; *line && count < maximum;)
-	{
-		const char *end = line + strcspn(line, "\n");
-		char copy[512];
-		char url[URL_SIZE];
-		char key[96];
-
-		snprintf(copy, sizeof(copy), "%.*s", (int)(end - line), line);
-		copy[strcspn(copy, "#\r")] = 0;
-		line = *end ? end + 1 : end;
-		if (sscanf(copy, "%255s %95s", url, key) != 2)
-			continue;
-		if (master_keep(url, key, urls, keys, count))
-			count++;
-	}
-	free(text);
-	return count;
 }
 
 static void read_masters(void)

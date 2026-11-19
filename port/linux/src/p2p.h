@@ -81,6 +81,8 @@ void p2p_set_hosting_allowed(int allowed);
 /* the invite link of the game this machine hosts (empty, 0: none, or LAN
 only) */
 int p2p_invite_link(char *link, int size);
+/* 0 when the link names no address, 1 for a private address, 2 for an internet address. */
+int p2p_invite_reach(const char *text);
 /* the host named by an invite link: its 6 byte identifier, the same bytes
 its game advertisement carries. 1 when text holds an invite */
 int p2p_invite_host(const char *text, unsigned char *host);

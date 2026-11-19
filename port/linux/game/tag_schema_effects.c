@@ -2685,8 +2685,7 @@ static boolean unicode_string_ends(
 }
 
 /* ends a string of length characters (it ends at the latest with its last)
-so that it is read to an end in it: whether it had to (the mods' strings
-too: mod_strings.c) */
+so that it is read to an end in it: whether it had to */
 boolean tag_schema_unicode_string_end(
 	wchar_t *string,
 	long length)

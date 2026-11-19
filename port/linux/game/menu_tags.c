@@ -399,9 +399,6 @@ static char const *const port_function_names[] =
 	/* (a new profile's screens: Settings' is then being edited, which the
 	Xbox's leaves to its own screens) */
 	"new campaign decision",
-	/* (the main menu's Mods: menu_functions.c) */
-	"port mods init", "port mods close", "port mods toggle", "port mods move up", "port mods move down",
-	"port mods save",
 	/* (B on a profile or gametype list: leaves the copy picker, else goes back) */
 	"port list copy back",
 	/* (Multiplayer's MATCHMAKING) */
@@ -435,8 +432,6 @@ static char const *const port_game_data_input_names[] =
 	/* (the profile settings' picture: the Xbox's of the button settings,
 	on Gamepad Setup's row) */
 	"port gamepad layout preview",
-	/* (the main menu's Mods) */
-	"port mods update",
 	/* (Hardcore's map list, and its setup while a gametype page is open) */
 	"port hardcore maps", "port hardcore setup", "port hardcore server",
 	/* (network co-op's pause menu's FRIENDLY FIRE: its text, ON or OFF) */
@@ -2297,16 +2292,6 @@ static boolean menus_pc_chosen(void)
 (display.menu_language), else English */
 static boolean menus_language_maps(void)
 {
-	static boolean said;
-	char const *value = config_string("display.menu_language");
-
-	if (!csstrcasecmp(value, "maps"))
-		return TRUE;
-	if (csstrcasecmp(value, "english") && !said)
-	{
-		platform_log("menus: display.menu_language \"%s\" is not \"maps\" or \"english\": English", value);
-		said = TRUE;
-	}
 	return FALSE;
 }
 

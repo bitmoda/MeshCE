@@ -156,6 +156,15 @@ short network_game_server_client_machine_faster_event(
 /* port: check if game started with only one team */
 boolean network_game_server_started_with_single_team(
 	struct network_game_server *server);
+/* the tick the host assigned when that player left. a later telling of
+the same leave uses it again. NONE when this game has not sent one. */
+void network_game_server_remember_quit(
+	int machine,
+	int controller,
+	long tick);
+long network_game_server_recall_quit(
+	int machine,
+	int controller);
 /* ---------- globals */
 
 /* ---------- public code */

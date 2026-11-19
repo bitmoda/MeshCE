@@ -33,9 +33,11 @@ votes against:
   player whose vote failed starts none for STARTER_COOLDOWN_SECONDS, and a
   player a vote failed against is not voted against again for
   TARGET_PROTECTION_SECONDS, both by address and hardware id.
-- The host's own players are never voted against; the host kicks and bans
-  as it likes (network_server_manager.c), and its machine votes as any
-  other.
+- The host's own players can be voted out with everyone else's. A host
+  does not kick or ban on its own. Its machine votes as any other.
+- A lobby vote uses the same count, except the person being voted on does
+  not vote. When that leaves fewer people than the count asks for, the
+  others are enough. Two players can remove one another.
 - Only the host speaks: what a client did wrong is told to it alone, at
   most once a second; the votes to everyone, only as they change.
 - A machine kicked by a vote is kept out of the host's games, by address
@@ -66,6 +68,12 @@ int config_boolean(const char *name);
 long config_integer(const char *name);
 void network_game_server_kick_machine(long machine_index, boolean kept_out);
 boolean network_game_server_kick_machine_of_player(long machine_index, boolean ban);
+boolean network_game_server_lobby_is_open(struct network_game_server *server);
+short network_game_server_seated_machines(long *machines, short maximum);
+void network_game_server_drop_local_players(void);
+long network_game_server_local_machine_index(void);
+boolean network_game_server_machine_is_local(long machine_index);
+void network_game_server_machine_player_names(long machine_index, char *names, long names_size);
 char const *network_game_server_machine_hardware_id(long machine_index);
 void p2p_hardware_id_sanitize(char *destination, int size, const char *source);
 unsigned long system_milliseconds(void);
@@ -94,6 +102,8 @@ enum
 	/* a client forgets the host's count it has not heard again this long */
 	STATUS_TIMEOUT_MILLISECONDS = 3000,
 	MAXIMUM_VOTEKICK_MACHINES = HALO_PORT_MAXIMUM_NETWORK_MACHINES,
+	/* a lobby vote, before the match, with no time-played gate */
+	LOBBY_VOTE_SECONDS = 30,
 };
 
 /* the status's flags */
@@ -198,6 +208,18 @@ static boolean votekick_gap;
 static struct votekick_identity votekick_kept_out_identities[MAXIMUM_REMEMBERED];
 static struct votekick_identity votekick_cooling_starters[MAXIMUM_REMEMBERED];
 static struct votekick_identity votekick_protected_targets[MAXIMUM_REMEMBERED];
+
+/* a lobby vote names machines. it does not keep anyone out of a later search. */
+static struct
+{
+	boolean active;
+	long target;
+	unsigned long started;
+	boolean voted[MAXIMUM_VOTEKICK_MACHINES];
+} lobby_vote;
+
+/* pads a passed vote removed. the lobby does not sit them down again. */
+static boolean votekick_local_blocked[4];
 
 /* a client: the host's count, as last heard (the time: 0, none) */
 static struct distributed_votekick_status votekick_status;
@@ -497,6 +519,14 @@ void network_votekick_machine_joined(
 	votekick_generations[machine_index]++;
 	votekick_requested[machine_index] = FALSE;
 	votekick.voted[machine_index] = FALSE;
+	/* a new arrival does not inherit a lobby vote, and is not the person
+	a vote already running was about. */
+	lobby_vote.voted[machine_index] = FALSE;
+	if (lobby_vote.active && lobby_vote.target == machine_index)
+	{
+		lobby_vote.active = FALSE;
+		csmemset(lobby_vote.voted, 0, sizeof(lobby_vote.voted));
+	}
 }
 
 /* (network_server_manager.c) whether a machine of the address (as it
@@ -555,7 +585,8 @@ static void votekick_voter_get(
 	{
 		voter->host = TRUE;
 		voter->eligible = TRUE;
-		voter->voted = votekick.active && votekick.host_voted;
+		voter->target = votekick.active && votekick.target_machine == NONE;
+		voter->voted = votekick.active && votekick.host_voted && !voter->target;
 		return;
 	}
 	voter->address = distributed_machine_real_address(machine_index);
@@ -575,7 +606,9 @@ static boolean votekick_target_present(
 	short count = votekick_machines(machine_indices, (short)NUMBEROF(machine_indices));
 	short index;
 
-	if (votekick_generations[votekick.target_machine] != votekick.target_generation)
+	if (votekick.target_machine != NONE &&
+		(!votekick_machine_valid(votekick.target_machine) ||
+			votekick_generations[votekick.target_machine] != votekick.target_generation))
 		return FALSE;
 	for (index = 0; index < count; index++)
 	{
@@ -705,7 +738,12 @@ static void votekick_pass(
 	distributed_send_notice(notice);
 	/* (one that left is gone: its slot may be another's now) */
 	if (!left)
-		network_game_server_kick_machine(votekick.target_machine, FALSE);
+	{
+		if (votekick.target_machine == NONE)
+			network_game_server_drop_local_players();
+		else
+			network_game_server_kick_machine(votekick.target_machine, FALSE);
+	}
 	votekick_end();
 }
 
@@ -760,12 +798,12 @@ static void votekick_host_request(
 		votekick_refuse(machine_index, "votekick: no such player");
 		return;
 	}
-	if (target_machine == NONE)
+	if (target_machine != NONE && !votekick_machine_valid(target_machine))
 	{
-		votekick_refuse(machine_index, "votekick: the host's players cannot be voted out");
+		votekick_refuse(machine_index, "votekick: no such player");
 		return;
 	}
-	if (!votekick_machine_valid(target_machine) || target_machine == machine_index)
+	if (target_machine == machine_index)
 	{
 		votekick_refuse(machine_index, "votekick: not against your own players");
 		return;
@@ -860,7 +898,7 @@ static void votekick_host_request(
 	csmemset(&votekick, 0, sizeof(votekick));
 	votekick.active = TRUE;
 	votekick.target_machine = target_machine;
-	votekick.target_generation = votekick_generations[target_machine];
+	votekick.target_generation = target_machine == NONE ? 0 : votekick_generations[target_machine];
 	votekick.target_player = player_index;
 	votekick.target_address = target.address;
 	csstrcpy(votekick.target_hardware_id, target.hardware_id);
@@ -888,16 +926,273 @@ static void votekick_host_request(
 		votekick_send_status();
 }
 
+void network_votekick_block_local(
+	short pad)
+{
+	if (pad >= 0 && pad < 4)
+		votekick_local_blocked[pad] = TRUE;
+}
+
+boolean network_votekick_local_blocked(
+	short pad)
+{
+	return pad >= 0 && pad < 4 && votekick_local_blocked[pad];
+}
+
+void network_votekick_clear_local_blocks(
+	void)
+{
+	csmemset(votekick_local_blocked, 0, sizeof(votekick_local_blocked));
+}
+
+static void lobby_vote_end(
+	void)
+{
+	lobby_vote.active = FALSE;
+	csmemset(lobby_vote.voted, 0, sizeof(lobby_vote.voted));
+}
+
+static int lobby_same_person(
+	long machine,
+	long other)
+{
+	struct votekick_voter left;
+	struct votekick_voter right;
+
+	if (machine == other)
+		return 1;
+	votekick_voter_get(machine, &left);
+	votekick_voter_get(other, &right);
+	return votekick_same_person(&left, &right) ? 1 : 0;
+}
+
+static int lobby_person_voted(
+	long const *machines,
+	short count,
+	long machine)
+{
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		long other;
+
+		other = machines[index];
+		if (other < 0 || other >= MAXIMUM_VOTEKICK_MACHINES || !lobby_vote.voted[other])
+			continue;
+		if (lobby_same_person(machine, other))
+			return 1;
+	}
+	return 0;
+}
+
+static void lobby_vote_tally(
+	short *votes,
+	short *needed)
+{
+	long machines[MAXIMUM_VOTEKICK_MACHINES];
+	short count;
+	short index;
+	short people;
+	short cast;
+
+	count = network_game_server_seated_machines(machines, (short)NUMBEROF(machines));
+	people = 0;
+	cast = 0;
+	for (index = 0; index < count; index++)
+	{
+		long machine;
+		short earlier;
+		int seen;
+
+		machine = machines[index];
+		seen = 0;
+		for (earlier = 0; earlier < index; earlier++)
+		{
+			if (lobby_same_person(machine, machines[earlier]))
+			{
+				seen = 1;
+				break;
+			}
+		}
+		if (seen)
+			continue;
+		people++;
+		if (lobby_same_person(machine, lobby_vote.target))
+			continue;
+		if (lobby_person_voted(machines, count, machine))
+			cast++;
+	}
+	*votes = cast;
+	*needed = votekick_votes_needed(people);
+	/* the person being voted on does not vote. two people would otherwise
+	need two votes and could never remove anyone. */
+	if (people > 1 && *needed > (short)(people - 1))
+		*needed = (short)(people - 1);
+}
+
+static int lobby_machine_seated(
+	long machine)
+{
+	long machines[MAXIMUM_VOTEKICK_MACHINES];
+	short count;
+	short index;
+
+	count = network_game_server_seated_machines(machines, (short)NUMBEROF(machines));
+	for (index = 0; index < count; index++)
+	{
+		if (machines[index] == machine)
+			return 1;
+	}
+	return 0;
+}
+
+static void lobby_vote_pass(
+	void)
+{
+	char names[96];
+	char notice[160];
+	short votes;
+	short needed;
+
+	lobby_vote_tally(&votes, &needed);
+	network_game_server_machine_player_names(lobby_vote.target, names, (long)sizeof(names));
+	if (!names[0])
+		csstrcpy(names, "that player");
+	snprintf(notice, sizeof(notice), "%s was removed by vote (%d of %d)", names, votes, needed);
+	distributed_send_notice(notice);
+	if (network_game_server_machine_is_local(lobby_vote.target))
+		network_game_server_drop_local_players();
+	else
+		network_game_server_kick_machine(lobby_vote.target, FALSE);
+	lobby_vote_end();
+}
+
+static void lobby_vote_apply(
+	long voter,
+	long target)
+{
+	char names[96];
+	char notice[160];
+	short votes;
+	short needed;
+
+	if (!votekick_machine_valid(voter) || !votekick_machine_valid(target))
+		return;
+	if (!lobby_machine_seated(voter) || !lobby_machine_seated(target))
+	{
+		votekick_refuse(voter, "votekick: no such player");
+		return;
+	}
+	if (voter == target || lobby_same_person(voter, target))
+	{
+		votekick_refuse(voter, "votekick: not against your own players");
+		return;
+	}
+	if (lobby_vote.active && lobby_vote.target != target)
+	{
+		network_game_server_machine_player_names(lobby_vote.target, names, (long)sizeof(names));
+		snprintf(notice, sizeof(notice), "votekick: wait for the vote to kick %s to end",
+			names[0] ? names : "that player");
+		votekick_refuse(voter, notice);
+		return;
+	}
+	if (lobby_vote.active && lobby_vote.voted[voter])
+		return;
+	if (!lobby_vote.active)
+	{
+		csmemset(&lobby_vote, 0, sizeof(lobby_vote));
+		lobby_vote.active = TRUE;
+		lobby_vote.target = target;
+		lobby_vote.started = system_milliseconds();
+	}
+	lobby_vote.voted[voter] = TRUE;
+	lobby_vote_tally(&votes, &needed);
+	network_game_server_machine_player_names(target, names, (long)sizeof(names));
+	if (!names[0])
+		csstrcpy(names, "that player");
+	snprintf(notice, sizeof(notice), "Vote to kick %s (%d of %d)", names, votes, needed);
+	distributed_send_notice(notice);
+	if (votes >= needed)
+		lobby_vote_pass();
+}
+
+void network_votekick_lobby_tick(
+	void)
+{
+	char names[96];
+	char notice[160];
+
+	if (!lobby_vote.active || !votekick_host())
+		return;
+	if (!lobby_machine_seated(lobby_vote.target))
+	{
+		lobby_vote_end();
+		return;
+	}
+	if (!votekick_time_reached(system_milliseconds(), lobby_vote.started + (unsigned long)LOBBY_VOTE_SECONDS * 1000UL))
+		return;
+	network_game_server_machine_player_names(lobby_vote.target, names, (long)sizeof(names));
+	snprintf(notice, sizeof(notice), "The vote to kick %s failed", names[0] ? names : "that player");
+	distributed_send_notice(notice);
+	lobby_vote_end();
+}
+
+boolean network_votekick_handles_message(
+	word const *message,
+	word size)
+{
+	struct distributed_message_header header;
+
+	if (!message || size < sizeof(header))
+		return FALSE;
+	csmemcpy(&header, message, sizeof(header));
+	return header.type == _distributed_message_votekick;
+}
+
+boolean network_votekick_lobby_vote(
+	short machine_index)
+{
+	struct network_game_server *server;
+	struct
+	{
+		struct distributed_message_header header;
+		struct distributed_votekick_request request;
+	} message;
+
+	server = global_network_game_server_get();
+	if (server && network_game_server_lobby_is_open(server))
+	{
+		lobby_vote_apply(network_game_server_local_machine_index(), (long)machine_index);
+		return TRUE;
+	}
+	if (game_connection() != _game_connection_network_client)
+		return FALSE;
+	csmemset(&message, 0, sizeof(message));
+	message.request.player_index = (byte)machine_index;
+	distributed_send(&message, _distributed_message_votekick, 1, (word)sizeof(message), _distributed_to_host_reliably);
+	return TRUE;
+}
+
 void network_votekick_handle_request(
 	long machine_index,
 	void const *entries,
 	boolean from_stream)
 {
 	struct distributed_votekick_request request;
+	struct network_game_server *server;
 	unsigned long now = system_milliseconds();
 
 	if (!votekick_host() || !votekick_machine_valid(machine_index) || !from_stream)
 		return;
+	csmemcpy(&request, entries, sizeof(request));
+	server = global_network_game_server_get();
+	/* a lobby vote is not held back by a request from the match that just ended. */
+	if (server && network_game_server_lobby_is_open(server))
+	{
+		lobby_vote_apply(machine_index, (long)request.player_index);
+		return;
+	}
 	/* (at most one a second: more are dropped, untold) */
 	if (votekick_requested[machine_index] &&
 		!votekick_time_reached(now, votekick_request_times[machine_index] + REQUEST_INTERVAL_MILLISECONDS))
@@ -906,7 +1201,6 @@ void network_votekick_handle_request(
 	}
 	votekick_requested[machine_index] = TRUE;
 	votekick_request_times[machine_index] = now;
-	csmemcpy(&request, entries, sizeof(request));
 	if (request.player_index >= MAXIMUM_TRACKED_PLAYERS)
 		return;
 	votekick_host_request(machine_index, request.player_index);
@@ -928,6 +1222,8 @@ void network_votekick_new_game(
 		votekick_report_short();
 	}
 	votekick.active = FALSE;
+	lobby_vote_end();
+	network_votekick_clear_local_blocks();
 	csmemset(&votekick_status, 0, sizeof(votekick_status));
 	votekick_status_heard = 0;
 }
@@ -944,6 +1240,7 @@ void network_votekick_host_tick(
 		if (votekick_machine_valid(machine_indices[index]))
 			votekick_played_ticks[machine_indices[index]]++;
 	}
+	network_votekick_lobby_tick();
 	if (!votekick.active)
 		return;
 	/* (the player left: the vote passes) */
@@ -1148,17 +1445,9 @@ boolean network_votekick_host_kick(
 	short player_index,
 	boolean ban)
 {
-	long machine_index;
-
-	if (!votekick_host() || !distributed_player(player_index))
-		return FALSE;
-	machine_index = distributed_player_machine(player_index);
-	if (machine_index == NONE)
-	{
-		console_warning("%s: not a player of the host's own machine", ban ? "ban" : "kick");
-		return FALSE;
-	}
-	return network_game_server_kick_machine_of_player(machine_index, ban);
+	(void)player_index;
+	console_warning("use votekick. a host does not %s", ban ? "ban" : "kick");
+	return FALSE;
 }
 
 boolean network_votekick_host(

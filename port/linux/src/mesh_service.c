@@ -25,6 +25,11 @@ static int ascii_letter(unsigned char character)
 	return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z');
 }
 
+static int ascii_digit(unsigned char character)
+{
+	return character >= '0' && character <= '9';
+}
+
 static int latin_letter(const unsigned char *text, int *used)
 {
 	if (text[0] < 0x80)
@@ -47,7 +52,7 @@ int mesh_gamertag_ok(const char *name)
 {
 	const unsigned char *text = (const unsigned char *)name;
 	int characters = 0;
-	int letters = 0;
+	int marks = 0;
 	int length;
 
 	if (!name || !name[0])
@@ -65,12 +70,12 @@ int mesh_gamertag_ok(const char *name)
 		{
 			if (*text < 0x20 || *text > 0x7E)
 				return 0;
-			if (ascii_letter(*text))
-				letters = 1;
+			if (ascii_letter(*text) || ascii_digit(*text))
+				marks = 1;
 			used = 1;
 		}
 		else if (latin_letter(text, &used))
-			letters = 1;
+			marks = 1;
 		else
 			return 0;
 		text += used;
@@ -78,7 +83,7 @@ int mesh_gamertag_ok(const char *name)
 		if (characters > 11)
 			return 0;
 	}
-	return letters;
+	return marks;
 }
 
 void mesh_identity(const unsigned char key[32], char *account, int account_size,
@@ -335,25 +340,50 @@ int mesh_wait_seconds(const char *playlist, int humans, int cap, int elapsed_sec
 {
 	if (cap < 1)
 		cap = 1;
+	(void)elapsed_seconds;
 	if (humans >= cap)
-		return 0;
-	if (playlist && strcmp(playlist, "ranked") && elapsed_seconds >= 100 && humans >= 2)
-		return 0;
+		return 30;
+	/* free for all is ready as soon as two people are seated. the lobby holds sixteen. */
+	if (playlist && !strcmp(playlist, "ffa") && humans >= 2)
+		return 30;
 	return -1;
 }
 
-const char *mesh_map_for(const unsigned char match[16])
+int mesh_seats_unfilled(int advertised, int cap, int present)
 {
-	static const char *const maps[] = { "hangemhigh", "prisoner", "beavercreek", "carousel", "chillout" };
+	if (cap < 1)
+		cap = 1;
+	if (present < 0)
+		present = 0;
+	if (advertised < cap)
+		return 0;
+	return present < cap;
+}
 
+const char *mesh_map_for(const unsigned char match[16], const char *playlist)
+{
+	static const char *const arena[] = { "hangemhigh", "prisoner", "beavercreek", "carousel", "chillout" };
+	static const char *const ffa[] = {
+		"hangemhigh", "prisoner", "beavercreek", "carousel", "chillout",
+		"sidewinder", "damnation", "ratrace", "boardingaction", "bloodgulch",
+		"wizard", "putput", "longest"
+	};
+	const char *const *maps = arena;
+	int count = (int)(sizeof(arena) / sizeof(arena[0]));
+
+	if (playlist && !strcmp(playlist, "ffa"))
+	{
+		maps = ffa;
+		count = (int)(sizeof(ffa) / sizeof(ffa[0]));
+	}
 	if (!match)
 		return maps[0];
-	return maps[match[0] % 5];
+	return maps[match[0] % count];
 }
 
 int mesh_score(const char *playlist)
 {
-	return playlist && !strcmp(playlist, "hardcore") ? 25 : 50;
+	return playlist && (!strcmp(playlist, "hardcore") || !strcmp(playlist, "ranked")) ? 25 : 50;
 }
 
 void mesh_loadout(const unsigned char match[16], const char *playlist, int *primary, int *secondary)
@@ -643,11 +673,19 @@ int mesh_result_apply(const char *body, const char *account, const char *name, i
 		named_count++;
 	}
 	/* The host often knows the gamertag and not the account. Two rows with
-	the same gamertag are left alone. */
+	the same gamertag are left alone, including when both carry this account. */
+	if (named_count > 1)
+		return 0;
 	if (found < 0 && named_count == 1)
 		found = named;
 	if (found < 0)
 		return 0;
+	/* someone left. the scoreboard can still name a winner. the list stays. */
+	for (index = 0; index < count; index++)
+	{
+		if (rows[index].quit)
+			return 1;
+	}
 	*games = mesh_games_apply(playlist, *games, rows[found].quit);
 	outcome = row_outcome(rows, count, found);
 	if (!strcmp(playlist, "ranked"))
@@ -671,18 +709,19 @@ static int tally_before(const struct mesh_tally_row *left, const struct mesh_tal
 }
 
 int mesh_tally_text(const char *match_id, const char *playlist,
-	const unsigned char keys[][32], int key_count,
+	const unsigned char keys[][32], const char key_names[][12], int key_count,
 	const struct mesh_tally_row *rows, int count, char *out, int size)
 {
 	struct mesh_tally_row ordered[16];
 	unsigned char ordered_keys[16][32];
+	char ordered_names[16][12];
 	int index;
 	int used;
 	int wrote;
 
 	if (!out || size < 8 || !match_id || !match_id[0] || !playlist || !playlist[0])
 		return 0;
-	if (key_count < 1 || key_count > 16 || !keys)
+	if (key_count < 1 || key_count > 16 || !keys || !key_names)
 		return 0;
 	if (count < 0 || count > 16 || (count > 0 && !rows))
 		return 0;
@@ -691,13 +730,20 @@ int mesh_tally_text(const char *match_id, const char *playlist,
 		int place;
 
 		memcpy(ordered_keys[index], keys[index], 32);
+		snprintf(ordered_names[index], sizeof(ordered_names[index]), "%s", key_names[index]);
+		if (!ordered_names[index][0] || strchr(ordered_names[index], '|') || strchr(ordered_names[index], '\n'))
+			return 0;
 		for (place = index; place > 0 && memcmp(ordered_keys[place], ordered_keys[place - 1], 32) < 0; place--)
 		{
 			unsigned char swap[32];
+			char swap_name[12];
 
 			memcpy(swap, ordered_keys[place - 1], 32);
 			memcpy(ordered_keys[place - 1], ordered_keys[place], 32);
 			memcpy(ordered_keys[place], swap, 32);
+			memcpy(swap_name, ordered_names[place - 1], sizeof(swap_name));
+			memcpy(ordered_names[place - 1], ordered_names[place], sizeof(swap_name));
+			memcpy(ordered_names[place], swap_name, sizeof(swap_name));
 		}
 	}
 	for (index = 0; index < count; index++)
@@ -724,7 +770,7 @@ int mesh_tally_text(const char *match_id, const char *playlist,
 
 		if (!hex_write(hex, (int)sizeof(hex), ordered_keys[index], 32))
 			return 0;
-		wrote = snprintf(out + used, (size_t)(size - used), "k|%s\n", hex);
+		wrote = snprintf(out + used, (size_t)(size - used), "k|%s|%s\n", hex, ordered_names[index]);
 		if (wrote < 0 || wrote >= size - used)
 			return 0;
 		used += wrote;
@@ -735,7 +781,7 @@ int mesh_tally_text(const char *match_id, const char *playlist,
 			return 0;
 		wrote = snprintf(out + used, (size_t)(size - used), "%s|%d|%d|%d|%d\n",
 			ordered[index].name, ordered[index].team, ordered[index].score, ordered[index].place,
-			ordered[index].quit ? 1 : 0);
+			ordered[index].quit > 0 ? ordered[index].quit : 0);
 		if (wrote < 0 || wrote >= size - used)
 			return 0;
 		used += wrote;
@@ -785,9 +831,11 @@ static const char *tally_key_lines(const char *text)
 	return line + 1;
 }
 
+/* bytes in one install line, including its newline. 0 when it is not one. */
 static int tally_key_line(const char *line)
 {
 	int index;
+	int length;
 
 	if (!line || line[0] != 'k' || line[1] != '|')
 		return 0;
@@ -796,7 +844,18 @@ static int tally_key_line(const char *line)
 		if (hex_nibble(line[2 + index]) < 0)
 			return 0;
 	}
-	return line[66] == '\n';
+	if (line[66] != '|')
+		return 0;
+	length = 67;
+	while (line[length] && line[length] != '\n')
+	{
+		if (line[length] == '|' || length >= 67 + 11)
+			return 0;
+		length++;
+	}
+	if (line[length] != '\n')
+		return 0;
+	return length + 1;
 }
 
 int mesh_tally_key_count(const char *text)
@@ -812,7 +871,7 @@ int mesh_tally_key_count(const char *text)
 	while (tally_key_line(line))
 	{
 		count++;
-		line += 67;
+		line += tally_key_line(line);
 	}
 	if (count != humans)
 		return 0;
@@ -847,7 +906,48 @@ int mesh_tally_key_at(const char *text, int index, unsigned char key[32])
 			return 1;
 		}
 		seen++;
-		line += 67;
+		line += tally_key_line(line);
+	}
+	return 0;
+}
+
+int mesh_tally_key_name(const char *text, const unsigned char key[32], char name[12])
+{
+	const char *line;
+
+	if (!name)
+		return 0;
+	name[0] = 0;
+	if (!key)
+		return 0;
+	line = tally_key_lines(text);
+	if (!line || !mesh_tally_key_count(text))
+		return 0;
+	while (tally_key_line(line))
+	{
+		unsigned char found[32];
+		int byte;
+		int span = tally_key_line(line);
+		int length = span - 68;
+
+		for (byte = 0; byte < 32; byte++)
+		{
+			int high = hex_nibble(line[2 + byte * 2]);
+			int low = hex_nibble(line[3 + byte * 2]);
+
+			if (high < 0 || low < 0)
+				return 0;
+			found[byte] = (unsigned char)((high << 4) | low);
+		}
+		if (!memcmp(found, key, 32))
+		{
+			if (length < 0 || length > 11)
+				return 0;
+			memcpy(name, line + 67, (size_t)length);
+			name[length] = 0;
+			return name[0] ? 1 : 0;
+		}
+		line += span;
 	}
 	return 0;
 }
@@ -883,7 +983,7 @@ static int tally_rows(const char *text, char *playlist, int playlist_size, struc
 	if (!line || !mesh_tally_key_count(text))
 		return 0;
 	while (tally_key_line(line))
-		line += 67;
+		line += tally_key_line(line);
 	while (*line && count < max)
 	{
 		char name[12];
@@ -909,7 +1009,7 @@ static int tally_rows(const char *text, char *playlist, int playlist_size, struc
 		rows[count].team = team;
 		rows[count].score = score;
 		rows[count].place = place;
-		rows[count].quit = quit ? 1 : 0;
+		rows[count].quit = quit > 0 ? quit : 0;
 		count++;
 		line = strchr(line, '\n');
 		if (!line)
@@ -931,10 +1031,88 @@ static int tally_rows(const char *text, char *playlist, int playlist_size, struc
 	return 1;
 }
 
+static int tally_name_count(const char *text, const char *name)
+{
+	int index;
+	int keys;
+	int count = 0;
+
+	if (!name || !name[0])
+		return 0;
+	keys = mesh_tally_key_count(text);
+	for (index = 0; index < keys; index++)
+	{
+		unsigned char key[32];
+		char found[12];
+
+		if (!mesh_tally_key_at(text, index, key))
+			continue;
+		if (mesh_tally_key_name(text, key, found) && !strcmp(found, name))
+			count++;
+	}
+	return count;
+}
+
+static int tally_key_row_quit(const char *text, const unsigned char key[32], struct mesh_tally_row *rows, int max,
+	int *count_out, int *earliest_out)
+{
+	char name[12];
+	int count = 0;
+	int index;
+	int found = 0;
+	int quit = 0;
+	int earliest = 0;
+
+	if (count_out)
+		*count_out = 0;
+	if (earliest_out)
+		*earliest_out = 0;
+	if (!mesh_tally_key_name(text, key, name) || tally_name_count(text, name) != 1)
+		return 0;
+	if (!tally_rows(text, NULL, 0, rows, max, &count))
+		return 0;
+	for (index = 0; index < count; index++)
+	{
+		if (rows[index].quit > 0 && (earliest == 0 || rows[index].quit < earliest))
+			earliest = rows[index].quit;
+		if (strcmp(rows[index].name, name) != 0)
+			continue;
+		found++;
+		quit = rows[index].quit;
+	}
+	if (count_out)
+		*count_out = count;
+	if (earliest_out)
+		*earliest_out = earliest;
+	if (found != 1 || quit < 1)
+		return 0;
+	return quit;
+}
+
+int mesh_tally_key_left(const char *text, const unsigned char key[32])
+{
+	struct mesh_tally_row rows[16];
+
+	return tally_key_row_quit(text, key, rows, 16, NULL, NULL) > 0;
+}
+
+int mesh_tally_key_quit(const char *text, const unsigned char key[32])
+{
+	struct mesh_tally_row rows[16];
+	int earliest = 0;
+	int quit;
+
+	quit = tally_key_row_quit(text, key, rows, 16, NULL, &earliest);
+	if (quit < 1 || earliest < 1)
+		return 0;
+	return quit == earliest;
+}
+
 int mesh_standings_commit(struct mesh_standing *book, int capacity, const char *tally,
 	const struct mesh_claim *claims, int claim_count)
 {
 	struct mesh_tally_row rows[16];
+	struct mesh_claim bound[16];
 	char playlist[16];
 	char body[4096];
 	int count = 0;
@@ -942,9 +1120,27 @@ int mesh_standings_commit(struct mesh_standing *book, int capacity, const char *
 	int row;
 	int used;
 	int wrote;
+	int bound_count = 0;
 
 	if (!book || capacity < 1 || !mesh_tally_humans(tally))
 		return 0;
+	if (claim_count > 16)
+		claim_count = 16;
+	for (claim = 0; claim < claim_count; claim++)
+	{
+		char tally_name[12];
+
+		if (!claims || !mesh_tally_key_name(tally, claims[claim].key, tally_name))
+			continue;
+		if (tally_name_count(tally, tally_name) != 1)
+			continue;
+		memset(&bound[bound_count], 0, sizeof(bound[bound_count]));
+		memcpy(bound[bound_count].key, claims[claim].key, 32);
+		snprintf(bound[bound_count].name, sizeof(bound[bound_count].name), "%s", tally_name);
+		bound_count++;
+	}
+	claims = bound;
+	claim_count = bound_count;
 	if (!tally_rows(tally, playlist, (int)sizeof(playlist), rows, 16, &count))
 		return 0;
 	wrote = snprintf(body, sizeof(body), "{\"playlist\":\"%s\",\"players\":[", playlist);

@@ -66,7 +66,7 @@ is newer (network_client_manager.c). A host advertises it, with its netcode,
 in its game's advertisement's reserved bytes (network_server_message_handler.c),
 which hosts built before there was a version send as zeros: version 0.
 Raise it with any change to what the machines send each other.
-41: the same record and message numbers as OpenCE. Messages 91 through 95
+41: the same record and message numbers as MeshCE. Messages 91 through 95
 are shield effects, a client's build, a shot's origin, and a dedicated
 server's map vote. This build's match start, split screen, and blasts
 follow those. The gametype options are 16 bytes longer.

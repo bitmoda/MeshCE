@@ -19,10 +19,6 @@ from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 PE = "main_menu/settings_select/player_setup/player_profile_edit"
-# the mods' screen, and its rows (_mods). Mods is a row of Settings.
-# The main menu's Quit sits where that item was.
-MODS = "main_menu/mods"
-MOD_ROWS = 11
 QUIT_ITEM_PLACE = (192, 391)
 YES_NO = [("YES", "true"), ("NO", "false")]
 # The Xbox look sensitivity, 1 through 10. 3 is the original setting.
@@ -84,8 +80,6 @@ SCREENS = {
             ("BUTTON STYLE:", "display.hud_button_style",
              [("CLASSIC", "classic"), ("GEMS", "gems"), ("DARK GEMS", "menu_gems")],
              "Classic: plain Xbox buttons. Gems: shaded Xbox\nbuttons. Dark Gems: the menu's button artwork.", None),
-            ("CAMPAIGN HUD:", "display.campaign_hud", ON_OFF,
-             "On a custom map, draw the campaign HUD. The reticle\nstays the map's. The next map uses the choice.", None),
             ("HIGH-RES TEXT:", "display.high_res_text", ON_OFF,
              "Draw text and titles with high-res fonts; off\ndraws the game's own.", None),
             ("ANTI-ALIASING:", "display.anti_aliasing",
@@ -215,7 +209,7 @@ SCREENS = {
 # Video Setup's categories open ordinary settings screens. Each has the same
 # pending edits, Defaults, OK and Cancel as the other settings screens.
 _video = SCREENS["video_settings"]
-_graphics = {"display.high_res_hud", "display.hud_button_style", "display.campaign_hud", "display.high_res_text", "display.anti_aliasing",
+_graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_res_text", "display.anti_aliasing",
              "display.anisotropic_filtering",
              "display.shadow_resolution", "display.per_pixel_lighting", "display.model_detail",
              "display.match_timer"}
@@ -387,7 +381,6 @@ STRING_OVERRIDES = {
         "Internet play, updates and the\\nmultiplayer HUD.\\n\\nProfile:",
         "Change the current profile's\\nfree-for-all multiplayer color.\\n\\nProfile:",
         "Halo: Combat Evolved, the Xbox\\ngame, on this computer.\\n\\nProfile:",
-        "Choose which mods are on.\\n\\n\\nProfile:",
     ],
 }
 
@@ -724,7 +717,6 @@ AIM_ASSIST_HELP = [
 ]
 
 STRING_INSERTS = {
-    f"{PE}/profile_edit_options": [(10, ["MODS"])],
     f"{PLAYER_EDIT}/player_options_labels": [(8, ["AIM ASSIST:"])],
     f"{PLAYER_EDIT}/cap_player_options": [(28, AIM_ASSIST_HELP)],
     # (Teamplay Options' voice chat and vote kick rows, after its own:
@@ -848,10 +840,6 @@ WIDGET_PATCHES = {
     # button settings, BITMAP_FRAMES; menu_functions.c's
     # profile_gamepad_layout)
     f"{PE}/profile_edit_extended_desc_pic": {"inputs": ["port gamepad layout preview"]},
-    # Mods is the row before About. Its description and picture stay the
-    # profile list's last (menu_functions.c's profile_rows_apply).
-    f"{PE}/profile_edit_select_list": {"insert_before": {
-        f"{PE}/about_item": [f'<child widget="{PE}/mods_profile_item"/>']}},
     # (straight to their screens: no "checking for updates" dialog, which
     # asked the PC version's servers)
     f"{MT}/multiplayer_type_join_internet_item": {"set": {"string_index": 6}, "handlers": [
@@ -1007,7 +995,6 @@ PORT_EXTRA_FRAMES = {
 # the titles this port has that the PC version has not, set as its headers
 # are (port/assets/menus/port_svg): bitmap name, text
 TITLES = {
-    "main_menu/mods/header_mods": "MODS",
     f"{MT}/join_game/header_server_browser": "SERVER BROWSER",
     f"{MT}/join_game/header_direct_link": "DIRECT LINK",
     f"{MT}/join_game/header_password": "PASSWORD",
@@ -1025,7 +1012,7 @@ TITLES = {
 
 def title_backdrop(width: float) -> str:
     """a header's dark backdrop, as the PC headers' redraws have it, for text
-    width units wide (the text is set over it in OpenCE: ce_menus.py)"""
+    width units wide (the text is set over it in MeshCE: ce_menus.py)"""
     return "\n".join([
         '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="64" viewBox="0 0 512 64">',
         "  <defs>",
@@ -1257,7 +1244,7 @@ def _server_settings() -> list:
                       f'<child widget="{base}/server_text_chat_spinner" x="320" y="1"/>'])
     extra += _widget(f"{base}/text_chat_label", [("type", "text"), ("controller", 1), ("width", 300),
                                                  ("height", 20), ("string_list", f"{base}/labels"),
-                                                 ("string_index", 14), ("font", "ui\\small_ui"),
+                                                 ("string_index", 13), ("font", "ui\\small_ui"),
                                                  ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 1)], [])
     extra += _widget(f"{base}/server_text_chat_spinner",
                      [("type", "spinner"), ("left", 3), ("top", 0), ("width", 147), ("height", 18),
@@ -1269,48 +1256,10 @@ def _server_settings() -> list:
                      ['<on event="created" run="port setting load"/>',
                       '<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     rows.append((f"{base}/op_text_chat", None))
-    # MODS (network.mods_allowed): ALLOWED, or NOT ALLOWED, which makes every
-    # machine play the map's own tags (menu_functions.c, network_mods.c)
-    extra += _widget(f"{base}/op_mods", [("width", 512), ("height", 20),
-                                         ("flags", "pass_unhandled_to_focused_child"),
-                                         ("bitmap", "bitmaps/option_bkds_short"), ("color", "#FF2896FF")],
-                     [f'<child widget="{base}/mods_label"/>',
-                      f'<child widget="{base}/server_mods_spinner" x="320" y="1"/>'])
-    extra += _widget(f"{base}/mods_label", [("type", "text"), ("controller", 1), ("width", 300),
-                                            ("height", 20), ("string_list", f"{base}/labels"),
-                                            ("string_index", 15), ("font", "ui\\small_ui"),
-                                            ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 1)], [])
-    extra += _widget(f"{base}/server_mods_spinner",
-                     [("type", "spinner"), ("left", 3), ("top", 0), ("width", 147), ("height", 18),
-                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                      ("strings", "ALLOWED|NOT ALLOWED"), ("setting", "network.mods_allowed"),
-                      ("values", "true|false"), ("font", "ui\\small_ui"), ("color", "#FF2896FF"),
-                      ("align", "center"), ("text_y", 0),
-                      ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                      ("header_bounds", "3 -6 15 0"), ("footer_bounds", "3 150 15 156")],
-                     ['<on event="created" run="port setting load"/>',
-                      '<on event="left_mouse" run="mouse spinner 1wide click"/>'])
-    rows.append((f"{base}/op_mods", None))
     # PASSWORD (a public internet game's: menu_functions.c's server_settings_update),
     # which players from the server browser must type
     extra += _value_row(base, "password", 10 + len(COOP_SETUP_SCREENS), "ss edit server password", compact=True)
     rows.append((f"{base}/op_password", None))
-    # MAP SHARING (map_share.c), a screen of its own as co-op's options are,
-    # for any game: SETUP_OPTIONS_PLACE below it
-    key, _, _, _ = MAP_SHARE_SETUP
-    target = f"{base}/{key}/{key}_screen"
-    extra += _widget(f"{base}/op_{key}", [("width", 512), ("height", 20),
-                                         ("flags", "pass_unhandled_to_focused_child"),
-                                         ("bitmap", "bitmaps/option_bkds_short"), ("color", "#FF2896FF")],
-                     [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
-                      '<on event="left_mouse" run="mouse emit accept event"/>',
-                      f'<child widget="{base}/{key}_label"/>'])
-    extra += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 300), ("height", 20),
-                                             ("string_list", f"{base}/labels"),
-                                             ("string_index", 11 + len(COOP_SETUP_SCREENS)),
-                                             ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("text_x", 13),
-                                             ("text_y", 1)], [])
-    rows.append((f"{base}/op_{key}", None, SETUP_OPTIONS_PLACE - 1))
     # co-op's options, in the place of the gametype's rows, which co-op hides
     # as multiplayer hides co-op's (menu_functions.c's server_settings_update):
     # rows opening their screens, as the gametype's options' do
@@ -1359,7 +1308,7 @@ def _server_settings() -> list:
                                          "PLAYER OPTIONS:", "ITEM OPTIONS:", "VEHICLE OPTIONS:", "INDICATOR OPTIONS:",
                                          "TEAMPLAY OPTIONS:", "LISTING:",
                                          *(f"{title}:" for _, title, _, _ in COOP_SETUP_SCREENS), "PASSWORD:",
-                                         f"{MAP_SHARE_SETUP[1]}:", "TEXT CHAT:", "MODS:"])
+                                         "TEXT CHAT:"])
     extra += _strings(f"{base}/help_strings", [
         "",
         "The name the game shows in the lists of games.\\nEnter changes it.",
@@ -1378,18 +1327,14 @@ def _server_settings() -> list:
         *(help_text for _, _, help_text, _ in COOP_SETUP_SCREENS),
         # (PASSWORD's)
         "Players from the Server Browser must type it to\\njoin (an invite link needs none). Enter sets it.",
-        # (MAP SHARING's)
-        MAP_SHARE_SETUP[2],
         # (TEXT CHAT's: the second while LISTING is PUBLIC)
         "Text chat for this game. A public listed game stays off.",
         "Text chat is off while this game is public.",
-        # (MODS': menu_functions.c's MODS_HELP)
-        "Players may play mods, or this game uses the map's own tags.\\nA player whose game cannot turn mods off is dropped.",
     ])
     lines = _screen(base, spec, rows, ["server settings update"],
                     ['<on event="created" run="server settings init"/>'], extra)
     # (co-op's options' screens, and map sharing's)
-    for key, title, _, screen_rows in [*COOP_SETUP_SCREENS, MAP_SHARE_SETUP]:
+    for key, title, _, screen_rows in COOP_SETUP_SCREENS:
         lines += _setup_option_screen(f"{base}/{key}", key, screen_rows)
     # (no Defaults: the bar is START and CANCEL; B cancels the name's edit
     # first)
@@ -1461,13 +1406,12 @@ MAP_SHARE_SETUP = ("map_share_options", "MAP SHARING",
                                            for kb in MAP_SHARE_UPLOADS],
      ["The most you send of maps, so that the game\\nkeeps the rest of your upload."] * len(MAP_SHARE_UPLOADS)),
 ])
-# (Server Setup's place of its options' rows, co-op's or the gametype's: after
-# MAP SHARING's. TEXT CHAT, MODS and PASSWORD sit above that, so the first
-# options row is place 8.)
-SETUP_OPTIONS_PLACE = 8
+# (Server Setup's place of its options' rows, co-op's or the gametype's.
+# TEXT CHAT and PASSWORD sit above that, so the first options row is place 6.)
+SETUP_OPTIONS_PLACE = 6
 # (their screens' titles)
 TITLES.update({f"{MT}/server_settings/{key}/header_{key}": title
-               for key, title, _, _ in [*COOP_SETUP_SCREENS, MAP_SHARE_SETUP]})
+               for key, title, _, _ in COOP_SETUP_SCREENS})
 # (the rows of a co-op options screen in one place, the one shown: PER
 # PLAYER's and MULTIPLIER's, by EXTRA ENEMIES')
 SETUP_OPTION_SAME_PLACE = set()
@@ -1858,7 +1802,7 @@ def _map_kind() -> list:
                       ("header_bounds", "3 -6 15 0"), ("footer_bounds", "3 238 15 244")],
                      ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     lines += _strings("main_menu/new_select/var_map_kinds",
-                      ["SINGLEPLAYER", "MULTIPLAYER", "CUSTOM SINGLEPLAYER", "CUSTOM MULTIPLAYER"])
+                      ["SINGLEPLAYER", "MULTIPLAYER"])
     return lines
 
 
@@ -2090,7 +2034,7 @@ def _hardcore_screen() -> list:
                      [f'<child widget="{base}/hardcore_kind_spinner" x="9" y="1"/>'])
     lines += _widget(f"{base}/hardcore_kind_spinner",
                      [("type", "spinner"), ("width", 238), ("height", 18), ("flags", "left_right_tabs_items"),
-                      ("strings", "MULTIPLAYER|CUSTOM MULTIPLAYER"), ("font", "ui\\small_ui"),
+                      ("strings", "MULTIPLAYER"), ("font", "ui\\small_ui"),
                       ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1),
                       ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
                       ("header_bounds", "3 -6 15 0"), ("footer_bounds", "3 238 15 244")],
@@ -2234,7 +2178,6 @@ def _hardcore_screen() -> list:
                       f'<on event="start" run="port hardcore start" open="{lobby}"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
     lines += _hardcore_rule_pages(base)
-    share = f"{MT}/server_settings/map_share_options/map_share_options_screen"
     lines += _widget(f"{base}/hardcore_server_screen", [("width", 640), ("height", 480),
                                                            ("flags", "pass_unhandled_to_focused_child pause_game"),
                                                            ("bitmap", "bitmaps/gradient")],
@@ -2253,10 +2196,8 @@ def _hardcore_screen() -> list:
                       f'<child widget="{base}/op_invite" x="54" y="133"/>',
                       f'<child widget="{base}/op_listing" x="54" y="163"/>',
                       f'<child widget="{base}/op_text_chat" x="54" y="193"/>',
-                      f'<child widget="{base}/op_mods" x="54" y="223"/>',
-                      f'<child widget="{base}/op_password" x="54" y="253"/>',
-                      f'<child widget="{base}/op_map_share" x="54" y="283"/>',
-                      f'<child widget="{base}/op_game_rules" x="54" y="313"/>',
+                      f'<child widget="{base}/op_password" x="54" y="223"/>',
+                      f'<child widget="{base}/op_game_rules" x="54" y="253"/>',
                       f'<child widget="{base}/server_button_bar" y="414"/>'])
     lines += _hardcore_field(base, "server_name", "GAME NAME", "ss edit server name")
     lines += _widget(f"{base}/op_max_players", [("width", 512), ("height", 20),
@@ -2310,34 +2251,7 @@ def _hardcore_screen() -> list:
                       ("header_bounds", "3 -6 15 0"), ("footer_bounds", "3 150 15 156")],
                      ['<on event="created" run="port setting load"/>',
                       '<on event="left_mouse" run="mouse spinner 1wide click"/>'])
-    lines += _widget(f"{base}/op_mods", [("width", 512), ("height", 20),
-                                         ("flags", "pass_unhandled_to_focused_child"),
-                                         ("bitmap", "bitmaps/option_bkds_short"), ("color", "#FF2896FF")],
-                     [f'<child widget="{base}/mods_label"/>',
-                      f'<child widget="{base}/server_mods_spinner" x="320" y="1"/>'])
-    lines += _widget(f"{base}/mods_label", [("type", "text"), ("controller", 1), ("width", 300),
-                                            ("height", 20), ("text", "MODS"), ("font", "ui\\small_ui"),
-                                            ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 1)], [])
-    lines += _widget(f"{base}/server_mods_spinner",
-                     [("type", "spinner"), ("left", 3), ("top", 0), ("width", 147), ("height", 18),
-                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                      ("strings", "ALLOWED|NOT ALLOWED"), ("setting", "network.mods_allowed"),
-                      ("values", "true|false"), ("font", "ui\\small_ui"), ("color", "#FF2896FF"),
-                      ("align", "center"), ("text_y", 1),
-                      ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                      ("header_bounds", "3 -6 15 0"), ("footer_bounds", "3 150 15 156")],
-                     ['<on event="created" run="port setting load"/>',
-                      '<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     lines += _hardcore_field(base, "password", "PASSWORD", "ss edit server password")
-    lines += _widget(f"{base}/op_map_share", [("width", 512), ("height", 20),
-                                              ("flags", "pass_unhandled_to_focused_child"),
-                                              ("bitmap", "bitmaps/option_bkds_short"), ("color", "#FF2896FF")],
-                     [f'<on event="a" open="{share}"/>', f'<on event="start" open="{share}"/>',
-                      '<on event="left_mouse" run="mouse emit accept event"/>',
-                      f'<child widget="{base}/map_share_label"/>'])
-    lines += _widget(f"{base}/map_share_label", [("type", "text"), ("controller", 1), ("width", 300),
-                                                 ("height", 20), ("text", "MAP SHARING"), ("font", "ui\\small_ui"),
-                                                 ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 1)], [])
     lines += _widget(f"{base}/op_game_rules", [("width", 512), ("height", 20),
                                                ("flags", "pass_unhandled_to_focused_child"),
                                                ("bitmap", "bitmaps/option_bkds_short"), ("color", "#FF2896FF")],
@@ -2365,7 +2279,6 @@ def _hardcore_screen() -> list:
         "Slayer, CTF, oddball or crazy king, and the\\nhardcore rules.",
         "Text chat for this game. A public listed game stays off.",
         "Text chat is off while this game is public.",
-        "Players may play mods, or this game uses the map's own tags.\\nA player whose game cannot turn mods off is dropped.",
     ])
     lines += _widget(f"{base}/server_button_bar", [("type", "column_list"), ("width", 640), ("height", 28),
                                                    ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
@@ -2405,177 +2318,7 @@ def multiplayer_files() -> dict:
         TEAMPLAY_EDIT.replace("/", ".") + ".port.xml": head + _teamplay_options_extras() + ["</menus>", ""],
         "main_menu/settings_select/multiplayer_setup/hardcore_options_edit".replace("/", ".") + ".xml":
             head + _hardcore_screen() + ["</menus>", ""],
-        MODS.replace("/", ".") + ".xml": [head[0], "<!-- The port's Mods screen, in the PC version's style "
-                                          "(tools/port_settings.py) -->", head[2]] + _mods() + ["</menus>", ""],
     }
 
 
 REPLACED_FOLDERS = [f"{MT}/server_settings"]
-
-
-# ---------- the mods (port/linux/game/mods.c): Settings' MODS row, which
-# opens the list of the mods folder's mods, in their load order,
-# each turned on or off and moved up or down (menu_functions.c's "port mods"
-# functions)
-
-# the redraws' main menu items (svg/shell/main_menu/menu_*.svg): their
-# letters' top and scale, and where their middle is
-MENU_ITEM_TOP, MENU_ITEM_SCALE, MENU_ITEM_MIDDLE = 6.57, 0.9037, 130.0
-# the space between two of the redraws' letters, in their units (their
-# capitals are 21.5 high), for the pairs the port's items have: no redraw has
-# these pairs, so each is the sum of a space after the first letter and one
-# before the second, fitted (least squares) to the 53 pairs the redraws' items
-# and headers have (D-I, of the main menu's Credits, gives D's right side)
-MENU_ITEM_SPACES = {"MO": 3.17, "OD": 2.8, "DS": 2.3}
-# the mods' status icons (port/assets/icons/lucide): a mod out of the order it
-# asks for, and one that cannot be played (another mod says it cannot be
-# played with it, or this build cannot play it): menu_functions.c's
-# mods_update shows frame 1 or 2
-MOD_STATUS_ICONS = [("triangle-alert", "#FFB020"), ("circle-x", "#FF4040")]
-
-
-def redraw_letters(redraws: Path) -> dict:
-    """the redraws' letters (their <path id="gA">s, one drawing of each
-    letter in every item and header), by letter"""
-    letters = {}
-    for svg in sorted(redraws.rglob("*.svg")):
-        if any(part.startswith("_") for part in svg.relative_to(redraws).parts):
-            continue
-        for letter, path in re.findall(r'<path id="g([A-Z])" d="([^"]+)"', svg.read_text()):
-            if letters.setdefault(letter, path) != path:
-                sys.exit(f"{svg}: the redraws draw {letter} two ways")
-    return letters
-
-
-def menu_item_frames(text: str, redraws: Path) -> list:
-    """the frames (svg, width, height) of a main menu item of the port's: its
-    text in the redraws' own letters (redraw_letters), spaced, placed and
-    coloured as their items are, dim, then white with their blue glow"""
-    from fontTools.pens.boundsPen import BoundsPen
-    from fontTools.svgLib.path import parse_path
-
-    letters = redraw_letters(redraws)
-    widths = []
-    for letter in text:
-        pen = BoundsPen(None)
-        parse_path(letters[letter], pen)
-        widths.append(pen.bounds[2])
-    spaces = [MENU_ITEM_SPACES[first + second] for first, second in zip(text, text[1:])]
-    x = MENU_ITEM_MIDDLE - (sum(widths) + sum(spaces)) * MENU_ITEM_SCALE / 2
-    uses = []
-    for index, letter in enumerate(text):
-        uses.append(f'<use href="#g{letter}" transform="translate({x:.2f},{MENU_ITEM_TOP}) scale({MENU_ITEM_SCALE})"/>')
-        x += (widths[index] + (spaces[index] if index < len(spaces) else 0)) * MENU_ITEM_SCALE
-    paths = [f'    <path id="g{letter}" d="{letters[letter]}"/>' for letter in sorted(set(text))]
-    head = ['<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="256" '
-            'height="64" viewBox="0 0 256 64">', "  <defs>", *paths]
-    dim = [*head, "  </defs>", f'  <!-- "{text}" (normal state: dim blue) -->',
-           '  <g id="text" fill="#2895ff" fill-opacity="0.467">', *[f"    {use}" for use in uses], "  </g>", "</svg>", ""]
-    glow = [*head, '    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="256" height="64">',
-            '      <feGaussianBlur stdDeviation="2.19"/>', "    </filter>", "  </defs>",
-            f'  <!-- "{text}" (highlighted: white with blue glow) -->',
-            '  <g fill="#2895ff" stroke="#2895ff" stroke-width="6.3" stroke-linejoin="round" opacity="0.650" '
-            'filter="url(#glow)">', *[f"    {use}" for use in uses], "  </g>",
-            '  <g id="text" fill="#fff">', *[f"    {use}" for use in uses], "  </g>", "</svg>", ""]
-    return [("\n".join(dim), 256, 64), ("\n".join(glow), 256, 64)]
-
-
-def mod_status_frames(icons: Path, size: int = 24) -> list:
-    """the frames of the mods' status icon, `size` pixels square (the menus
-    draw a bitmap at its size): none, out of order, incompatible"""
-    blank = f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24"/>\n'
-    return [(blank, size, size)] + [
-        ((icons / f"{icon}.svg").read_text().replace('stroke="currentColor"', f'stroke="{color}"')
-         .replace('width="24"', f'width="{size}"').replace('height="24"', f'height="{size}"'), size, size)
-        for icon, color in MOD_STATUS_ICONS]
-
-
-def _text_button(name: str, text: str, handlers: list, width: int = 96) -> list:
-    """a button of the button bar with its own words"""
-    pairs = [("type", "text"), ("width", width), ("height", 20), ("bitmap", "bitmaps/text_button_background"),
-             ("text", text), ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"), ("align", "center"), ("text_y", 1)]
-    return _widget(name, pairs, handlers + ['<on event="left_mouse" run="mouse emit accept event"/>'])
-
-
-def _mods() -> list:
-    """Settings' MODS row and its screen, laid out as the lobby is: on the
-    left the mods as a resource pack list has them (the one at the top playing
-    over those below it: the load order upside down), a row each with its
-    status icon, name and ON or OFF; on the right, in the lobby's frame, the
-    mod chosen: its name, what is wrong with it, whether it is on and its
-    priority, and what its mod.toml says. A turns the mod chosen on or off,
-    left and right (and MOVE UP and MOVE DOWN, for the mouse) move it; OK
-    keeps it all (load_order.toml) and plays them, Cancel forgets it
-    (menu_functions.c). The row is Settings' own (option_bkds_join_field),
-    and the list's rows are the lobby's."""
-    base = MODS
-    lines = _widget(f"{PE}/mods_profile_item",
-                    [("type", "text"), ("left", 51), ("top", 218), ("width", 226), ("height", 20),
-                     ("bitmap", "bitmaps/option_bkds_join_field"),
-                     ("string_list", f"{PE}/profile_edit_options"), ("string_index", 10),
-                     ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 1)],
-                    [f'<on event="a" open="{base}/mods_screen"/>', f'<on event="start" open="{base}/mods_screen"/>',
-                     '<on event="left_mouse" run="mouse emit accept event"/>'])
-    lines += _widget(f"{base}/mods_screen", [("width", 640), ("height", 480),
-                                             ("flags", "pass_unhandled_to_focused_child pause_game"),
-                                             ("bitmap", "bitmaps/gradient")],
-                     ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
-                      '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
-                      f'<child widget="{base}/mods_list"/>',
-                      f'<child widget="{base}/header_mods"/>'])
-    lines += _header(f"{base}/header_mods", f"{base}/header_mods")
-    # (the lobby's rows, MOD_ROWS of them, 20 apart, scrolling over more mods)
-    rows = [f'<child widget="{base}/op_mod_{index + 1}" x="20" y="{73 + 20 * index}"/>' for index in range(MOD_ROWS)]
-    lines += _widget(f"{base}/mods_list", [("type", "column_list"), ("width", 640), ("height", 480),
-                                           ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),
-                                           ("description", f"{base}/mod_details")],
-                     ['<data input="port mods update"/>', '<on event="created" run="port mods init"/>',
-                      '<on event="deleted" run="port mods close"/>', *rows,
-                      f'<child widget="{base}/button_bar" y="414"/>'])
-    for index in range(MOD_ROWS):
-        lines += _widget(f"{base}/op_mod_{index + 1}",
-                         [("width", 398 if index == 0 else 382), ("height", 20),
-                          ("flags", "pass_unhandled_to_focused_child"),
-                          ("bitmap", "bitmaps/option_bkds_join_top" if index == 0 else "bitmaps/option_bkds_join"),
-                          ("color", "#FF2896FF")],
-                         ['<on event="a" run="port mods toggle"/>', '<on event="start" run="port mods toggle"/>',
-                          '<on event="left" run="port mods move up"/>', '<on event="right" run="port mods move down"/>',
-                          '<on event="left_mouse" run="mouse emit accept event"/>',
-                          f'<child widget="{base}/mod_status" x="8" y="2"/>',
-                          f'<child widget="{base}/mod_name" x="28"/>',
-                          f'<child widget="{base}/mod_state" x="326"/>'])
-    lines += _widget(f"{base}/mod_status", [("controller", 1), ("width", 16), ("height", 16),
-                                            ("bitmap", "mods/status_small")], [])
-    lines += _widget(f"{base}/mod_name",
-                     [("type", "text"), ("controller", 1), ("width", 290), ("height", 20), ("font", "ui\\small_ui"),
-                      ("color", "#FF2896FF"), ("text_y", 1)], [])
-    lines += _widget(f"{base}/mod_state",
-                     [("type", "text"), ("controller", 1), ("width", 48), ("height", 20), ("font", "ui\\small_ui"),
-                      ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1), ("text_flags", "no_focus_test")], [])
-    # (in the lobby's frame, sel_list_desc_bkd's: the mod chosen's name, the
-    # icon of what is wrong with it, and the rest)
-    lines += _widget(f"{base}/mod_details", [("width", 640), ("height", 480)],
-                     [f'<child widget="{base}/mod_details_name"/>', f'<child widget="{base}/mod_details_status"/>',
-                      f'<child widget="{base}/mod_details_text"/>'])
-    lines += _widget(f"{base}/mod_details_name",
-                     [("type", "text"), ("controller", 1), ("left", 412), ("top", 84), ("width", 200), ("height", 44),
-                      ("font", "ui\\large_ui"), ("color", "#FFFFFFFF")], [])
-    lines += _widget(f"{base}/mod_details_status", [("controller", 1), ("left", 411), ("top", 132), ("width", 16),
-                                                    ("height", 16), ("bitmap", "mods/status_small")], [])
-    lines += _widget(f"{base}/mod_details_text",
-                     [("type", "text"), ("controller", 1), ("left", 412), ("top", 130), ("width", 200),
-                      ("height", 272), ("font", "ui\\small_ui"), ("color", "#FF2896FF")], [])
-    lines += _widget(f"{base}/button_bar",
-                     [("type", "column_list"), ("width", 640), ("height", 28),
-                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
-                     [f'<child widget="{base}/button_up" x="20" y="1"/>',
-                      f'<child widget="{base}/button_down" x="146" y="1"/>',
-                      f'<child widget="{base}/button_ok" x="406" y="1"/>',
-                      '<child widget="common_button_cancel" x="510" y="1"/>'])
-    lines += _text_button(f"{base}/button_up", "MOVE UP", ['<on event="a" run="port mods move up"/>',
-                                                          '<on event="start" run="port mods move up"/>'], 120)
-    lines += _text_button(f"{base}/button_down", "MOVE DOWN", ['<on event="a" run="port mods move down"/>',
-                                                              '<on event="start" run="port mods move down"/>'], 120)
-    lines += _button(f"{base}/button_ok", 1, ['<on event="a" run="port mods save" back="true"/>',
-                                              '<on event="start" run="port mods save" back="true"/>'])
-    return lines

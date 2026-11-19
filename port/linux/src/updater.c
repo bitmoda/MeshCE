@@ -55,7 +55,7 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 #define HALO_BUILD_CHANNEL "main"
 #endif
 #ifndef HALO_UPDATE_REPOSITORY
-#define HALO_UPDATE_REPOSITORY "mastercheese-dev/OpenCE"
+#define HALO_UPDATE_REPOSITORY "bitmoda/MeshCE"
 #endif
 
 #define UPDATE_REPOSITORY HALO_UPDATE_REPOSITORY
@@ -521,7 +521,7 @@ static int updater_download_zip(const char *zip_path, char *error, size_t error_
 		snprintf(error, error_size, "could not start the download");
 		return 0;
 	}
-	window = SDL_CreateWindow("OpenCE", 640, 150, 0);
+	window = SDL_CreateWindow("MeshCE", 640, 150, 0);
 	if (window)
 		renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
 	while (!finished)
@@ -623,7 +623,7 @@ static void updater_update(void)
 		char message[800];
 
 		snprintf(message, sizeof(message), "The update failed:\n\n%s", error);
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", message, NULL);
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MeshCE", message, NULL);
 	}
 }
 
@@ -782,14 +782,14 @@ void updater_poll(SDL_Window *window)
 	else
 	{
 		snprintf(message, sizeof(message),
-			"A new version of Halo was detected (build %ld; this is build %d).\n\n"
+			"A new version of MeshCE was detected (build %ld; this is build %d).\n\n"
 			"Do you want to update? The game will close and start the new version.",
 			updater_latest_build, HALO_BUILD_NUMBER);
 	}
 	{
 		/* A channel change is the setting already chosen. "Do not ask again"
 		would leave a testing build in place after that setting was turned off. */
-		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, window, "Halo: new version", message,
+		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, window, "MeshCE", message,
 			updater_switching ? 2 : 3, question_buttons, NULL };
 
 		if (!SDL_ShowMessageBox(&question, &answer))
@@ -797,7 +797,7 @@ void updater_poll(SDL_Window *window)
 	}
 	if (!updater_switching && answer == 2)
 	{
-		SDL_MessageBoxData confirm = { SDL_MESSAGEBOX_WARNING, window, "Halo: new version",
+		SDL_MessageBoxData confirm = { SDL_MESSAGEBOX_WARNING, window, "MeshCE",
 			"Stop asking about new versions?\n\n"
 			"To ask again, set auto = true in the [update] section of config.toml.",
 			2, confirm_buttons, NULL };

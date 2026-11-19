@@ -172,6 +172,11 @@ void main_load_ui_scenario(
 void main_menu_load(
 	void);
 
+/* The menu map is already loaded. Its scripts move the camera behind the
+lobby, the way they do when that lobby is opened from the multiplayer menu. */
+void main_menu_scene_resume(
+	void);
+
 void main_present_frame(
 	void);
 

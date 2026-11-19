@@ -31,7 +31,6 @@ online = true
 address = "127.0.0.1"
 join_from_clipboard = false
 allow_upnp = false
-signalling_brokers = "127.0.0.1:1"
 stun_servers = ""
 [discord]
 application_id = "{APPLICATION}"

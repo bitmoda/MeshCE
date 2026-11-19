@@ -141,7 +141,7 @@ void console_open(
 #endif
 #ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 		if (console_globals.active)
-			console_printf(FALSE, "OpenCE options: type OpenCE for controls (timer, markers, audio).");
+			console_printf(FALSE, "MeshCE options: type MeshCE for controls (timer, markers, audio).");
 #endif
 	}
 
@@ -279,14 +279,12 @@ static char *console_get_text_to_autocomplete(
 	return result;
 }
 
-/* port: the text after the host's ban or kick command ("ban ", "kick "),
-or any player's votekick ("votekick "), which completes as a player's name
-(network_game_server_matching_player_names, network_votekick_matching_player_names;
-the command's index: votekick's, 2); NULL if the input is not one */
+/* port: the text after votekick ("votekick "), which completes as a player's
+name (network_votekick_matching_player_names). NULL if the input is not that. */
 static char *console_player_command_name(
 	short *command_index)
 {
-	static char const *const commands[] = { "ban", "kick", "votekick" };
+	static char const *const commands[] = { "votekick" };
 	char *text = console_globals.input_state.result;
 	short command;
 
@@ -334,10 +332,8 @@ static void console_complete(
 		short index;
 
 		/* (the votekick's: any machine's, from the game's players) */
-		if (command_index == 2)
-			count = network_votekick_matching_player_names(token, player_names, NUMBEROF(player_names));
-		else
-			count = network_game_server_matching_player_names(token, player_names, NUMBEROF(player_names));
+		count = network_votekick_matching_player_names(token, player_names, NUMBEROF(player_names));
+		(void)command_index;
 		for (index = 0; index < count; index++)
 			matching_items[index] = player_names[index];
 	}

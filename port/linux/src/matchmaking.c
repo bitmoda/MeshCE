@@ -2,22 +2,13 @@
 MATCHMAKING.C
 
 The matchmaking service. Find Game uses the peer mesh. This client does not
-open the old broker at net.opence.org, and it does not publish on that
-broker's topics. The catalog below is the local list.
+open a broker and does not publish a queue. The catalog below is the local
+list.
 
-The catalog is the menu. One client id is kept for the install. Choosing a
-playlist opens this machine's private lobby on that playlist's port and
-publishes hceu/3/mm/v1/queue/{clientId}, retained, every 5 seconds. Find
-Game sets ready. The queue also says how many humans are in this lobby.
-While this machine is hosting it publishes the invite, retained, every 5
-seconds on hceu/3/mm/v1/hosted/{clientId}. An empty publish on that topic
-is only when this machine is no longer the host. The queue stays until the
-match starts or the player leaves, and an empty retained publish clears
-it. A friend who joined this lobby's link clears their own queue. Offers
-on this search are ignored until that queue has been published. role host
-updates the lobby already open. role wait keeps it from starting. role
-server or join, with an invite and phase search, leaves this lobby and
-joins that invite.
+The catalog is the menu. Choosing a playlist opens this machine's private
+lobby on that playlist's port. Find Game sets ready. role host updates the
+lobby already open. role wait keeps it from starting. role server or join,
+with an invite and phase search, leaves this lobby and joins that invite.
 */
 
 #include "platform.h"
@@ -33,12 +24,15 @@ joins that invite.
 #include <stdio.h>
 #include <string.h>
 
+void game_engine_override_map_name(char const *map_name);
+void network_votekick_clear_local_blocks(void);
+
 enum
 {
 	QUEUE_INTERVAL = 5000,
 	KEEP_ALIVE = 30,
 	LINK_BUFFER = 16384,
-	/* one id for this install, 8 to 64 of the broker's characters */
+	/* one id for this install */
 	ID_GENERATED = 16,
 	ID_LIMIT = 64
 };
@@ -66,10 +60,17 @@ static struct
 	int in_party;
 	/* this machine followed someone else's join link. it stays through the match. */
 	int joined_link;
+	/* this find-game join returns to the search if that lobby is full */
+	int rejoin_search;
+	int resume_ui;
+	char resume_playlist[16];
 	int ready;
 	int locals;
 	/* humans in this lobby, not the seats the service fills */
 	int players;
+	/* after a match, the countdown waits until this many humans are seated again.
+	0 means this search has not returned from a match. */
+	int rematch_players;
 	/* wait_seconds 0 is a backstop, not an immediate start */
 	unsigned long backstop_at;
 	int backstop_seated;
@@ -324,6 +325,7 @@ static void rules_default(struct matchmaking_rules *rules, const char *playlist,
 		MATCHMAKING_MODE_ODDBALL, MATCHMAKING_MODE_KING };
 	int objective = !strcmp(playlist, "objective");
 	int hardcore = !strcmp(playlist, "hardcore");
+	int ranked = !strcmp(playlist, "ranked");
 
 	memset(rules, 0, sizeof(*rules));
 	rules->mode = objective ? objective_modes[map_index(map)] : MATCHMAKING_MODE_SLAYER;
@@ -336,7 +338,7 @@ static void rules_default(struct matchmaking_rules *rules, const char *playlist,
 		rules->mode == MATCHMAKING_MODE_CTF ? 3 : 5;
 	rules->no_death_bonus = 1;
 	rules->no_kill_penalty = 1;
-	rules->teams = objective || hardcore;
+	rules->teams = objective || hardcore || ranked;
 	rules->ball_spawn_count = 1;
 }
 
@@ -433,9 +435,18 @@ static unsigned short playlist_port(const char *playlist)
 	return 0;
 }
 
+/* free for all holds sixteen. 2v2 and ranked hold four. */
 static int players_for(const char *playlist)
 {
-	return !strcmp(playlist, "hardcore") ? 4 : 8;
+	if (playlist && (!strcmp(playlist, "hardcore") || !strcmp(playlist, "ranked")))
+		return 4;
+	return 16;
+}
+
+/* one screen can fill a social lobby. ranked keeps a second machine in the match. */
+static int local_cap_for(const char *playlist)
+{
+	return playlist && !strcmp(playlist, "ranked") ? 2 : 4;
 }
 
 static int map_ok(const char *map)
@@ -532,6 +543,8 @@ static void catalog_store(const char *payload)
 			snprintf(row->name, sizeof(row->name), "%s", row->id);
 		if (json_number(object, "players", &number) && number >= 2 && number <= 128)
 			row->players = (int)number;
+		if (!strcmp(row->id, "ffa"))
+			row->players = players_for(row->id);
 		if (json_bool(object, "teams", &mode))
 			row->teams = mode ? 1 : 0;
 		if (json_number(object, "team_size", &number) && number >= 1 && number <= 16)
@@ -776,6 +789,8 @@ static void offer_read(struct matchmaking_offer *offer, const char *payload, con
 	offer->players = players_for(offer->playlist);
 	if (json_number(payload, "players", &number) && number >= 2 && number <= 128)
 		offer->players = (int)number;
+	if (!strcmp(offer->playlist, "ffa"))
+		offer->players = players_for(offer->playlist);
 	if (json_number(payload, "joined", &number) && number >= 0 && number <= 128)
 		offer->joined = (int)number;
 	if (json_number(payload, "wait_seconds", &number) && number >= 0 && number <= 600)
@@ -816,816 +831,19 @@ static void offer_read(struct matchmaking_offer *offer, const char *payload, con
 	}
 }
 
-static int put_short_length(unsigned char *bytes, int value)
-{
-	bytes[0] = (unsigned char)((value >> 8) & 255);
-	bytes[1] = (unsigned char)(value & 255);
-	return 2;
-}
-
-static int put_text(unsigned char *bytes, const char *text)
-{
-	int length = (int)strlen(text);
-
-	put_short_length(bytes, length);
-	memcpy(bytes + 2, text, (size_t)length);
-	return 2 + length;
-}
-
-static int put_remaining(unsigned char *bytes, int value)
-{
-	int size = 0;
-
-	do
-	{
-		unsigned char byte = (unsigned char)(value & 127);
-
-		value >>= 7;
-		bytes[size++] = (unsigned char)(value ? byte | 128 : byte);
-	} while (value && size < 4);
-	return size;
-}
-
-static int get_remaining(const unsigned char *bytes, int size, int *offset, int *value)
-{
-	int shift = 0;
-
-	*value = 0;
-	for (;;)
-	{
-		unsigned char byte;
-
-		if (*offset >= size || shift > 21)
-			return 0;
-		byte = bytes[(*offset)++];
-		*value += (byte & 127) << shift;
-		if (!(byte & 128))
-			return 1;
-		shift += 7;
-	}
-}
-
-static int json_escape(char *destination, int size, const char *text)
-{
-	int length = 0;
-
-	while (*text && length < size - 2)
-	{
-		char character = *text++;
-
-		if (character == '"' || character == '\\')
-		{
-			if (length >= size - 3)
-				break;
-			destination[length++] = '\\';
-		}
-		else if ((unsigned char)character < 32)
-			character = '?';
-		destination[length++] = character;
-	}
-	destination[length] = 0;
-	return length;
-}
-
-struct matchmaking_link
-{
-	int socket;
-	int tcp;
-	int ready;
-	int epoch;
-	int published;
-	unsigned long published_at;
-	unsigned long last_queue;
-	unsigned long last_io;
-	int subscribed;
-	unsigned long subscribed_at;
-	/* a publish arrived after this subscribe, so its retained offer was read */
-	int retain_seen;
-	/* one more read after that, so a second retained packet is not this search */
-	int retain_wait;
-	int search;
-	int party_mark;
-	int hosted_queued;
-	unsigned long last_hosted;
-	int host_mark;
-	int clear_queued;
-	int unhost_queued;
-	unsigned char input[LINK_BUFFER];
-	int input_size;
-	unsigned char output[LINK_BUFFER];
-	int output_size;
-};
-
-static struct matchmaking_link link_state;
-
-static void link_set(int state)
-{
-	pthread_mutex_lock(&matchmaking_lock);
-	matchmaking.link = state;
-	pthread_mutex_unlock(&matchmaking_lock);
-}
-
-static void link_close(struct matchmaking_link *link)
-{
-	if (link->socket >= 0)
-		posix_socket_close(link->socket);
-	memset(link, 0, sizeof(*link));
-	link->socket = -1;
-	link_set(0);
-}
-
-static int link_flush(struct matchmaking_link *link)
-{
-	while (link->output_size)
-	{
-		int sent = posix_socket_send(link->socket, link->output, link->output_size, 0);
-
-		if (sent < 0)
-		{
-			int error = posix_socket_last_error();
-
-			if (error == WSAEWOULDBLOCK || error == WSAEINPROGRESS)
-				return 1;
-			return 0;
-		}
-		if (!sent)
-			return 0;
-		memmove(link->output, link->output + sent, (size_t)(link->output_size - sent));
-		link->output_size -= sent;
-		link->last_io = GetTickCount();
-	}
-	return 1;
-}
-
-static int link_send(struct matchmaking_link *link, const unsigned char *packet, int size)
-{
-	if (size < 0 || link->output_size + size > (int)sizeof(link->output))
-		return 0;
-	memcpy(link->output + link->output_size, packet, (size_t)size);
-	link->output_size += size;
-	return link_flush(link);
-}
-
-static int link_packet(struct matchmaking_link *link, unsigned char header, const unsigned char *body, int size)
-{
-	unsigned char packet[4096];
-	int remaining;
-
-	if (size < 0 || size > (int)sizeof(packet) - 5)
-		return 0;
-	packet[0] = header;
-	remaining = 1 + put_remaining(packet + 1, size);
-	memcpy(packet + remaining, body, (size_t)size);
-	return link_send(link, packet, remaining + size);
-}
-
-static int link_connect(struct matchmaking_link *link)
-{
-	(void)link;
-	return 0;
-}
-
-/* the broker has accepted the TCP connection, so the session can start */
-static int link_greet(struct matchmaking_link *link, const char *id)
-{
-	unsigned char body[128];
-	int size = 0;
-
-	size += put_text(body, "MQTT");
-	body[size++] = 4;
-	body[size++] = 0x02;
-	body[size++] = 0;
-	body[size++] = KEEP_ALIVE;
-	size += put_text(body + size, id);
-	return link_packet(link, 0x10, body, size);
-}
-
-static int link_connected(struct matchmaking_link *link)
-{
-	int error = 0;
-	int length = (int)sizeof(error);
-	int ready[1];
-	int ready_count = 1;
-
-	ready[0] = link->socket;
-	if (posix_socket_select(NULL, NULL, ready, &ready_count, NULL, NULL, 0, 0, 0) <= 0 || !ready_count)
-		return 0;
-	/* 0x1007 is Winsock's SO_ERROR; the port turns it into the host's */
-	if (posix_socket_getsockopt(link->socket, SOL_SOCKET, 0x1007, &error, &length) != 0 || error)
-		return -1;
-	return 1;
-}
-
-static int link_subscribe_topic(struct matchmaking_link *link, const char *topic, int packet_id)
-{
-	unsigned char body[160];
-	int size = 0;
-
-	if (!topic || !topic[0] || (int)strlen(topic) + 6 >= (int)sizeof(body))
-		return 0;
-	body[size++] = (unsigned char)((packet_id >> 8) & 0xFF);
-	body[size++] = (unsigned char)(packet_id & 0xFF);
-	size += put_text(body + size, topic);
-	body[size++] = 0;
-	return link_packet(link, 0x82, body, size);
-}
-
-static int link_subscribe(struct matchmaking_link *link, const char *id)
-{
-	unsigned char body[512];
-	char topic[96];
-	int size = 0;
-
-	body[size++] = 0;
-	body[size++] = 1;
-	size += put_text(body + size, "hceu/3/mm/v1/catalog");
-	body[size++] = 0;
-	snprintf(topic, sizeof(topic), "hceu/3/mm/v1/offer/%s", id);
-	size += put_text(body + size, topic);
-	body[size++] = 0;
-	snprintf(topic, sizeof(topic), "hceu/3/mm/v1/register/%s/reply", id);
-	if (size + 2 + (int)strlen(topic) + 1 < (int)sizeof(body))
-	{
-		size += put_text(body + size, topic);
-		body[size++] = 0;
-	}
-	snprintf(topic, sizeof(topic), "hceu/3/mm/v1/result/%s/reply", id);
-	if (size + 2 + (int)strlen(topic) + 1 < (int)sizeof(body))
-	{
-		size += put_text(body + size, topic);
-		body[size++] = 0;
-	}
-	return link_packet(link, 0x82, body, size);
-}
-
-static int link_publish(struct matchmaking_link *link, const char *topic, const char *payload, int retain)
-{
-	unsigned char body[3200];
-	int size = 0;
-	int length = (int)strlen(payload);
-
-	if (length > 2800)
-		return 0;
-	size += put_text(body, topic);
-	memcpy(body + size, payload, (size_t)length);
-	size += length;
-	/* retain keeps the queue, and an empty payload removes it */
-	return link_packet(link, retain ? 0x31 : 0x30, body, size);
-}
-
-static void offer_store(const char *payload, int epoch, const char *playlist)
-{
-	struct matchmaking_offer offer;
-
-	/* a mesh search names the host. the broker's offer must not replace it. */
-	if (peer_mesh_searching())
-		return;
-	offer_read(&offer, payload, playlist);
-	pthread_mutex_lock(&matchmaking_lock);
-	if (epoch == matchmaking.epoch && matchmaking.queueing && matchmaking.accept_offers)
-	{
-		if (offer.role == MATCHMAKING_ROLE_NONE)
-			matchmaking.offer_ready = 0;
-		else
-		{
-			matchmaking.offer = offer;
-			matchmaking.offer_ready = 1;
-		}
-	}
-	pthread_mutex_unlock(&matchmaking_lock);
-}
-
-static void link_publish_in(struct matchmaking_link *link, const unsigned char *packet, int size, int epoch,
-	const char *playlist, const char *id)
-{
-	int offset = 1;
-	int remaining;
-	int topic_length;
-	char topic[96];
-	char wanted[96];
-	const unsigned char *body;
-	char payload[4096];
-	int payload_size;
-
-	if (size < 3 || (packet[0] & 0xF0) != 0x30)
-		return;
-	if (!get_remaining(packet, size, &offset, &remaining) || offset + remaining > size)
-		return;
-	body = packet + offset;
-	if (remaining < 2)
-		return;
-	topic_length = (body[0] << 8) | body[1];
-	if (topic_length < 0 || topic_length > (int)sizeof(topic) - 1 || 2 + topic_length > remaining)
-		return;
-	memcpy(topic, body + 2, (size_t)topic_length);
-	topic[topic_length] = 0;
-	link->retain_seen = 1;
-	if (!strcmp(topic, "hceu/3/mm/v1/catalog"))
-	{
-		payload_size = 2 + topic_length;
-		if ((packet[0] & 0x06) != 0)
-		{
-			if (payload_size + 2 > remaining)
-				return;
-			payload_size += 2;
-		}
-		if (payload_size > remaining || remaining - payload_size >= (int)sizeof(payload))
-			return;
-		memcpy(payload, body + payload_size, (size_t)(remaining - payload_size));
-		payload[remaining - payload_size] = 0;
-		catalog_store(payload);
-		return;
-	}
-	/* the length is the prefix only. one extra character compares the id and misses every reply. */
-	if (!strncmp(topic, "hceu/3/mm/v1/register/", sizeof("hceu/3/mm/v1/register/") - 1) ||
-		!strncmp(topic, "hceu/3/mm/v1/account/", sizeof("hceu/3/mm/v1/account/") - 1) ||
-		!strncmp(topic, "hceu/3/mm/v1/profile/", sizeof("hceu/3/mm/v1/profile/") - 1) ||
-		!strncmp(topic, "hceu/3/mm/v1/result/", sizeof("hceu/3/mm/v1/result/") - 1))
-	{
-		payload_size = 2 + topic_length;
-		if ((packet[0] & 0x06) != 0)
-		{
-			if (payload_size + 2 > remaining)
-				return;
-			payload_size += 2;
-		}
-		if (payload_size > remaining || remaining - payload_size >= (int)sizeof(payload))
-			return;
-		memcpy(payload, body + payload_size, (size_t)(remaining - payload_size));
-		payload[remaining - payload_size] = 0;
-		rank_apply_downlink(topic, payload, id);
-		return;
-	}
-	snprintf(wanted, sizeof(wanted), "hceu/3/mm/v1/offer/%s", id);
-	if (strcmp(topic, wanted))
-		return;
-	/* the retained offer from the last search arrives with the subscribe.
-	this search has not published yet, so that offer is not ours. */
-	if (!link->published)
-		return;
-	payload_size = 2 + topic_length;
-	if ((packet[0] & 0x06) != 0)
-	{
-		if (payload_size + 2 > remaining)
-			return;
-		payload_size += 2;
-	}
-	if (payload_size > remaining || remaining - payload_size >= (int)sizeof(payload))
-		return;
-	memcpy(payload, body + payload_size, (size_t)(remaining - payload_size));
-	payload_size = remaining - payload_size;
-	payload[payload_size] = 0;
-	offer_store(payload, epoch, playlist);
-}
-
-static void link_take(struct matchmaking_link *link, int epoch, const char *playlist, const char *id)
-{
-	for (;;)
-	{
-		int offset = 0;
-		int remaining;
-		int total;
-
-		if (link->input_size < 2)
-			return;
-		offset = 1;
-		if (!get_remaining(link->input, link->input_size, &offset, &remaining))
-		{
-			if (link->input_size >= 5)
-			{
-				link_close(link);
-				link_set(-1);
-			}
-			return;
-		}
-		total = offset + remaining;
-		if (total > (int)sizeof(link->input))
-		{
-			link_close(link);
-			link_set(-1);
-			return;
-		}
-		if (link->input_size < total)
-			return;
-		if ((link->input[0] & 0xF0) == 0x20)
-		{
-			if (remaining >= 2 && link->input[offset + 1] == 0)
-			{
-				link->ready = 1;
-				link_set(1);
-			}
-			else
-			{
-				link_close(link);
-				link_set(-1);
-				return;
-			}
-		}
-		else if ((link->input[0] & 0xF0) == 0x30)
-			link_publish_in(link, link->input, total, epoch, playlist, id);
-		memmove(link->input, link->input + total, (size_t)(link->input_size - total));
-		link->input_size -= total;
-	}
-}
-
-static void link_read(struct matchmaking_link *link, int epoch, const char *playlist, const char *id)
-{
-	int socket = link->socket;
-	int ready_count = 1;
-
-	if (socket < 0)
-		return;
-	if (posix_socket_select(&socket, &ready_count, NULL, NULL, NULL, NULL, 0, 200000, 0) > 0 && ready_count)
-	{
-		int got = posix_socket_recv(link->socket, link->input + link->input_size,
-			(int)sizeof(link->input) - link->input_size, 0);
-
-		if (got < 0)
-		{
-			int error = posix_socket_last_error();
-
-			if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
-			{
-				link_close(link);
-				link_set(-1);
-			}
-			return;
-		}
-		if (!got)
-		{
-			link_close(link);
-			link_set(-1);
-			return;
-		}
-		link->input_size += got;
-		link->last_io = GetTickCount();
-	}
-	link_take(link, epoch, playlist, id);
-}
-
-static void queue_payload(char *payload, int size, const char *playlist, const char *name, int ready, int locals,
-	int players)
-{
-	char escaped[32];
-	char extra[1100];
-	int wrote;
-	int cap = players_for(playlist);
-
-	if (locals < 1)
-		locals = 1;
-	if (locals > 4)
-		locals = 4;
-	if (players < 1)
-		players = 1;
-	if (cap < 1)
-		cap = 8;
-	if (players > cap)
-		players = cap;
-	json_escape(escaped, sizeof(escaped), name);
-	wrote = snprintf(payload, (size_t)size,
-		"{\"playlist\":\"%s\",\"name\":\"%s\",\"network\":%d,\"ready\":%s,\"locals\":%d,\"players\":%d}",
-		playlist, escaped, HALO_PORT_NETWORK_VERSION, ready ? "true" : "false", locals, players);
-	if (wrote < 1 || wrote >= size)
-		return;
-	if (!rank_queue_extra(extra, (int)sizeof(extra)) || !extra[0])
-		return;
-	if (wrote + (int)strlen(extra) + 1 >= size)
-		return;
-	payload[wrote - 1] = 0;
-	memcpy(payload + wrote - 1, extra, strlen(extra) + 1);
-	memcpy(payload + strlen(payload), "}", 2);
-}
-
 static void *matchmaking_thread(void *unused)
 {
-	struct matchmaking_link *link = &link_state;
-	unsigned long rank_service_at = 0;
-
 	(void)unused;
-	link->socket = -1;
 	for (;;)
 	{
-		int listening;
-		int queueing;
-		int want_clear;
-		int want_hosted;
-		int hosted_sent;
-		int want_unhost;
-		int host_mark;
-		int search;
-		int epoch;
-		int queue_ready;
-		int queue_locals;
-		int queue_players;
-		int party_mark;
-		unsigned short host_port;
-		char id[ID_LIMIT + 1];
-		char playlist[16];
-		char name[12];
-		char host_playlist[16];
-		char topic[96];
-		char payload[1400];
+		int active;
 
 		pthread_mutex_lock(&matchmaking_lock);
-		listening = matchmaking.listening;
-		queueing = matchmaking.queueing;
-		want_clear = matchmaking.want_clear;
-		want_hosted = matchmaking.want_hosted;
-		hosted_sent = matchmaking.hosted_sent;
-		want_unhost = matchmaking.want_unhost;
-		host_mark = matchmaking.host_mark;
-		search = matchmaking.search;
-		epoch = matchmaking.epoch;
-		queue_ready = matchmaking.ready;
-		queue_locals = matchmaking.locals;
-		queue_players = matchmaking.players;
-		party_mark = matchmaking.party_mark;
-		host_port = matchmaking.host_port;
-		memcpy(id, matchmaking.id, sizeof(id));
-		memcpy(playlist, matchmaking.playlist, sizeof(playlist));
-		memcpy(name, matchmaking.name, sizeof(name));
-		memcpy(host_playlist, matchmaking.host_playlist, sizeof(host_playlist));
+		active = matchmaking.listening || matchmaking.queueing;
 		pthread_mutex_unlock(&matchmaking_lock);
-		if (link->search != search)
-		{
-			link->search = search;
-			link->published = 0;
-			link->last_queue = 0;
-			link->party_mark = party_mark;
-			link->unhost_queued = 0;
-		}
-		/* locals or Find Game changed: the next publish goes now, then every 5 seconds */
-		if (link->party_mark != party_mark)
-		{
-			link->party_mark = party_mark;
-			if (link->published)
-				link->last_queue = 0;
-		}
-		if (link->host_mark != host_mark)
-		{
-			link->host_mark = host_mark;
-			link->hosted_queued = 0;
-			link->last_hosted = 0;
-		}
-		if (!want_unhost)
-			link->unhost_queued = 0;
-		/* stay up for the catalog, the queue, the empty clear, or the invite */
-		if (!listening && !queueing && !want_clear && !want_hosted && !want_unhost)
-		{
-			if (link->output_size)
-				link_flush(link);
-			if (!link->output_size && link->socket >= 0)
-				link_close(link);
-			posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, 0, 200000, 0);
-			continue;
-		}
-		if (link->socket >= 0 && link->epoch != epoch)
-			link_close(link);
-		if (link->socket < 0)
-		{
-			if (!link_connect(link))
-			{
-				mesh_account_serve();
-				posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, 1, 0, 0);
-				continue;
-			}
-			link->epoch = epoch;
-			link->subscribed = 0;
-			link->published = 0;
-			link->retain_seen = 0;
-			link->retain_wait = 0;
-		}
-		if (!link->tcp)
-		{
-			int connected = link_connected(link);
-
-			if (connected < 0 || GetTickCount() - link->last_io > 8000)
-			{
-				link_close(link);
-				link_set(-1);
-				continue;
-			}
-			if (!connected)
-			{
-				posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, 0, 200000, 0);
-				continue;
-			}
-			if (!link_greet(link, id))
-			{
-				link_close(link);
-				link_set(-1);
-				continue;
-			}
-			link->tcp = 1;
-		}
-		if (!link_flush(link))
-		{
-			link_close(link);
-			link_set(-1);
-			continue;
-		}
-		link_read(link, epoch, playlist, id);
-		if (link->socket < 0)
-			continue;
-		if (!link->ready)
-		{
-			if (GetTickCount() - link->last_io > 8000)
-			{
-				link_close(link);
-				link_set(-1);
-			}
-			continue;
-		}
-		/* subscribe, then read what is already retained, before the first publish */
-		if (!link->subscribed)
-		{
-			if (link_subscribe(link, id))
-			{
-				link->subscribed = 1;
-				link->subscribed_at = GetTickCount();
-				link->retain_seen = 0;
-				link->retain_wait = 0;
-			}
-			continue;
-		}
-		if (queueing && link->subscribed && (!link->published || GetTickCount() - link->last_queue >= QUEUE_INTERVAL))
-		{
-			int wait_retain = 0;
-
-			/* the subscribe delivers the previous offer. ignore that, then publish. */
-			if (!link->published)
-			{
-				if (link->input_size > 0)
-					wait_retain = 1;
-				else if (!link->retain_seen && GetTickCount() - link->subscribed_at < 1000)
-					wait_retain = 1;
-				else if (link->retain_seen && !link->retain_wait)
-				{
-					link->retain_wait = 1;
-					wait_retain = 1;
-				}
-			}
-			if (wait_retain)
-				;
-			else
-			{
-				int still;
-
-				pthread_mutex_lock(&matchmaking_lock);
-				still = matchmaking.queueing && matchmaking.search == search;
-				if (still)
-				{
-					queue_ready = matchmaking.ready;
-					queue_locals = matchmaking.locals;
-					queue_players = matchmaking.players;
-				}
-				pthread_mutex_unlock(&matchmaking_lock);
-				if (still)
-				{
-					snprintf(topic, sizeof(topic), "hceu/3/mm/v1/queue/%s", id);
-					queue_payload(payload, sizeof(payload), playlist, name, queue_ready, queue_locals,
-						queue_players);
-					if (link_publish(link, topic, payload, 1))
-					{
-						rank_kick_published();
-						link->published = 1;
-						link->published_at = GetTickCount();
-						link->last_queue = GetTickCount();
-						pthread_mutex_lock(&matchmaking_lock);
-						if (matchmaking.epoch == epoch && matchmaking.search == search && matchmaking.queueing)
-						{
-							matchmaking.accept_offers = 1;
-							matchmaking.published_queue = 1;
-						}
-						pthread_mutex_unlock(&matchmaking_lock);
-					}
-				}
-			}
-		}
-		if (link->subscribed && (!rank_service_at || GetTickCount() - rank_service_at >= QUEUE_INTERVAL))
-		{
-			char rank_topic[128];
-			char rank_body[2560];
-			unsigned generation = 0;
-
-			rank_service_at = GetTickCount();
-			while (rank_subscribe_next(rank_topic, (int)sizeof(rank_topic)))
-			{
-				if (!link_subscribe_topic(link, rank_topic, 2))
-					break;
-				rank_subscribe_done(rank_topic);
-			}
-			if (rank_register_pending(rank_body, (int)sizeof(rank_body)))
-			{
-				snprintf(rank_topic, sizeof(rank_topic), "hceu/3/mm/v1/register/%s", id);
-				link_publish(link, rank_topic, rank_body, 0);
-			}
-			if (rank_profile_pending(rank_topic, (int)sizeof(rank_topic), rank_body, (int)sizeof(rank_body),
-				&generation))
-			{
-				if (link_publish(link, rank_topic, rank_body, 0))
-					rank_profile_sent(generation);
-			}
-			snprintf(rank_topic, sizeof(rank_topic), "hceu/3/mm/v1/result/%s", id);
-			if (rank_result_pending(rank_body, (int)sizeof(rank_body)))
-			{
-				if (link_publish(link, rank_topic, rank_body, 0))
-					rank_result_sent();
-			}
-		}
-		/* the same 5 seconds as the queue. one publish is not enough. an empty
-		publish is the unhost path, and only that path. */
-		if (want_hosted && link->subscribed && port_ok(host_port) &&
-			(!link->last_hosted || GetTickCount() - link->last_hosted >= QUEUE_INTERVAL))
-		{
-			char invite[256];
-
-			if (p2p_invite_link(invite, sizeof(invite)) && !strncmp(invite, "halo://join/", 12))
-			{
-				char escaped[512];
-
-				json_escape(escaped, sizeof(escaped), invite);
-				snprintf(topic, sizeof(topic), "hceu/3/mm/v1/hosted/%s", id);
-				snprintf(payload, sizeof(payload),
-					"{\"playlist\":\"%s\",\"invite\":\"%s\",\"port\":%u,\"client\":\"%s\"}",
-					host_playlist, escaped, (unsigned)host_port, id);
-				if (link_publish(link, topic, payload, 1))
-				{
-					link->hosted_queued = 1;
-					link->last_hosted = GetTickCount();
-				}
-			}
-		}
-		if (want_hosted && link->hosted_queued && !link->output_size)
-		{
-			pthread_mutex_lock(&matchmaking_lock);
-			if (matchmaking.epoch == epoch && matchmaking.host_mark == host_mark)
-				matchmaking.hosted_sent = 1;
-			pthread_mutex_unlock(&matchmaking_lock);
-		}
-		/* this machine is no longer that host. an empty retain removes the invite. */
-		if (want_unhost && !want_hosted && link->subscribed)
-		{
-			int still_unhost;
-
-			pthread_mutex_lock(&matchmaking_lock);
-			still_unhost = matchmaking.want_unhost && !matchmaking.want_hosted;
-			pthread_mutex_unlock(&matchmaking_lock);
-			if (still_unhost && !link->unhost_queued)
-			{
-				snprintf(topic, sizeof(topic), "hceu/3/mm/v1/hosted/%s", id);
-				if (link_publish(link, topic, "", 1))
-					link->unhost_queued = 1;
-			}
-			if (!still_unhost)
-				link->unhost_queued = 0;
-			else if (link->unhost_queued && !link->output_size)
-			{
-				pthread_mutex_lock(&matchmaking_lock);
-				if (matchmaking.epoch == epoch && matchmaking.want_unhost && !matchmaking.want_hosted)
-				{
-					matchmaking.want_unhost = 0;
-					matchmaking.hosted_sent = 0;
-				}
-				pthread_mutex_unlock(&matchmaking_lock);
-				link->unhost_queued = 0;
-			}
-		}
-		/* the queue is cleared after a hosted publish that is still going out */
-		if (want_clear && link->subscribed && !(want_hosted && !hosted_sent))
-		{
-			int still_clear;
-
-			pthread_mutex_lock(&matchmaking_lock);
-			still_clear = matchmaking.want_clear && !matchmaking.queueing;
-			pthread_mutex_unlock(&matchmaking_lock);
-			if (still_clear && !link->clear_queued)
-			{
-				snprintf(topic, sizeof(topic), "hceu/3/mm/v1/queue/%s", id);
-				if (link_publish(link, topic, "", 1))
-					link->clear_queued = 1;
-			}
-			if (!still_clear)
-				link->clear_queued = 0;
-			else if (link->clear_queued && !link->output_size)
-			{
-				pthread_mutex_lock(&matchmaking_lock);
-				if (matchmaking.epoch == epoch && matchmaking.want_clear && !matchmaking.queueing)
-				{
-					matchmaking.want_clear = 0;
-					matchmaking.published_queue = 0;
-				}
-				pthread_mutex_unlock(&matchmaking_lock);
-				link->clear_queued = 0;
-				link->published = 0;
-			}
-		}
-		if (GetTickCount() - link->last_io > (KEEP_ALIVE - 5) * 1000)
-		{
-			unsigned char ping[2] = { 0xC0, 0 };
-
-			link_send(link, ping, 2);
-		}
+		if (active)
+			mesh_account_serve();
+		posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, active ? 1 : 0, active ? 0 : 200000, 0);
 	}
 	return NULL;
 }
@@ -1800,7 +1018,7 @@ static void catalog_fallback_locked(void)
 	row = &matchmaking.catalog.playlist[0];
 	snprintf(row->id, sizeof(row->id), "ffa");
 	snprintf(row->name, sizeof(row->name), "FFA");
-	row->players = 8;
+	row->players = players_for(row->id);
 	row->team_size = 1;
 	row->local_max = 4;
 	row->port = (unsigned short)NETWORK_PLAYLIST_PORT_FFA;
@@ -1819,9 +1037,10 @@ static void catalog_fallback_locked(void)
 	row = &matchmaking.catalog.playlist[2];
 	snprintf(row->id, sizeof(row->id), "ranked");
 	snprintf(row->name, sizeof(row->name), "Ranked");
-	row->players = 8;
-	row->team_size = 1;
-	row->local_max = 4;
+	row->players = 4;
+	row->teams = 1;
+	row->team_size = 2;
+	row->local_max = 2;
 	row->port = (unsigned short)NETWORK_PLAYLIST_PORT_RANKED;
 	row->ranked = 1;
 	snprintf(row->modes[0], sizeof(row->modes[0]), "slayer");
@@ -1966,8 +1185,13 @@ void matchmaking_queue(const char *playlist, const char *name)
 	offer_clear(&matchmaking.offer);
 	matchmaking.accept_offers = 0;
 	matchmaking.search++;
+	matchmaking.rejoin_search = 0;
+	matchmaking.resume_ui = 0;
+	matchmaking.resume_playlist[0] = 0;
+	matchmaking.rematch_players = 0;
 	pthread_mutex_unlock(&matchmaking_lock);
 	screen_party_clear();
+	network_votekick_clear_local_blocks();
 	matchmaking_ensure();
 }
 
@@ -1999,6 +1223,180 @@ void matchmaking_set_players(int players)
 		matchmaking.party_mark++;
 	}
 	pthread_mutex_unlock(&matchmaking_lock);
+}
+
+/* the lock is held. a rematch keeps the countdown off until the players who
+finished are seated again. any other ready lobby counts down for 30 seconds. */
+static int seated_wait_locked(const char *playlist, int humans, int cap, int seconds)
+{
+	int wait = mesh_wait_seconds(playlist, humans, cap, seconds);
+
+	if (matchmaking.rematch_players > 1 && humans < matchmaking.rematch_players)
+		return -1;
+	return wait;
+}
+
+void matchmaking_note_seated(int humans)
+{
+	struct matchmaking_offer offer;
+	int seconds;
+	int cap;
+
+	if (humans < 1)
+		humans = 1;
+	if (humans > 16)
+		humans = 16;
+	/* recorded before the offer update. a party-phase return must still tell
+	the search that someone is already sitting here. */
+	peer_mesh_set_game_humans(humans);
+	seconds = peer_mesh_search_seconds();
+	pthread_mutex_lock(&matchmaking_lock);
+	if (!matchmaking.queueing || !matchmaking.ready ||
+		matchmaking.offer.role != MATCHMAKING_ROLE_HOST ||
+		matchmaking.offer.phase == MATCHMAKING_PHASE_PARTY)
+	{
+		pthread_mutex_unlock(&matchmaking_lock);
+		return;
+	}
+	offer = matchmaking.offer;
+	cap = players_for(offer.playlist);
+	if (cap > 0 && humans > cap)
+		humans = cap;
+	offer.joined = humans;
+	offer.wait_seconds = seated_wait_locked(offer.playlist, humans, cap, seconds);
+	matchmaking.offer = offer;
+	if (matchmaking.players != humans)
+	{
+		matchmaking.players = humans;
+		matchmaking.party_mark++;
+	}
+	pthread_mutex_unlock(&matchmaking_lock);
+	peer_mesh_set_game_humans(humans);
+	peer_mesh_set_lobby_full(cap > 0 && humans >= cap);
+}
+
+int matchmaking_begin_rematch(int humans)
+{
+	unsigned char id[16];
+	char hex[40];
+	char map_name[64];
+	char playlist[16];
+	const char *map;
+	int index;
+	int cap;
+	int seconds;
+	int ok;
+
+	pthread_mutex_lock(&matchmaking_lock);
+	ok = matchmaking.game_port && matchmaking.playlist[0];
+	playlist[0] = 0;
+	if (ok)
+		copy_short(playlist, (int)sizeof(playlist), matchmaking.playlist, 15);
+	pthread_mutex_unlock(&matchmaking_lock);
+	if (!ok)
+		return 0;
+	posix_random_bytes(id, 16);
+	for (index = 0; index < 16; index++)
+		snprintf(hex + index * 2, 3, "%02x", id[index]);
+	hex[32] = 0;
+	peer_mesh_set_rematch(id);
+	seconds = peer_mesh_search_seconds();
+	map = mesh_map_for(id, playlist);
+	snprintf(map_name, sizeof(map_name), "%s", map ? map : "hangemhigh");
+	if (humans < 2)
+		humans = 2;
+	cap = players_for(playlist);
+	if (cap > 0 && humans > cap)
+		humans = cap;
+	pthread_mutex_lock(&matchmaking_lock);
+	if (!matchmaking.game_port || !matchmaking.playlist[0])
+	{
+		pthread_mutex_unlock(&matchmaking_lock);
+		return 0;
+	}
+	matchmaking.rematch_players = humans;
+	matchmaking.players = humans;
+	matchmaking.queueing = 1;
+	matchmaking.ready = 1;
+	matchmaking.in_party = 1;
+	matchmaking.offer.role = MATCHMAKING_ROLE_HOST;
+	matchmaking.offer.phase = MATCHMAKING_PHASE_SEARCH;
+	copy_short(matchmaking.offer.playlist, (int)sizeof(matchmaking.offer.playlist), playlist, 15);
+	copy_short(matchmaking.offer.match, (int)sizeof(matchmaking.offer.match), hex, 39);
+	copy_short(matchmaking.offer.map, (int)sizeof(matchmaking.offer.map), map_name, 31);
+	rules_default(&matchmaking.offer.rules, playlist, matchmaking.offer.map);
+	mesh_loadout(id, playlist, &matchmaking.offer.rules.primary, &matchmaking.offer.rules.secondary);
+	matchmaking.offer.players = cap > 0 ? cap : humans;
+	matchmaking.offer.teams = matchmaking.offer.rules.teams;
+	matchmaking.offer.team_size = matchmaking.offer.teams ? 2 : 1;
+	matchmaking.offer.local_max = local_cap_for(playlist);
+	matchmaking.offer.bots = 0;
+	matchmaking.offer.joined = humans;
+	matchmaking.offer.wait_seconds = seated_wait_locked(playlist, humans, cap > 0 ? cap : humans, seconds);
+	matchmaking.offer_ready = 1;
+	pthread_mutex_unlock(&matchmaking_lock);
+	game_engine_override_map_name(map_name);
+	return 1;
+}
+
+int matchmaking_rematch_target(void)
+{
+	int target;
+
+	pthread_mutex_lock(&matchmaking_lock);
+	target = matchmaking.rematch_players;
+	pthread_mutex_unlock(&matchmaking_lock);
+	return target;
+}
+
+void matchmaking_arm_rejoin(void)
+{
+	pthread_mutex_lock(&matchmaking_lock);
+	matchmaking.rejoin_search = matchmaking.playlist[0] ? 1 : 0;
+	pthread_mutex_unlock(&matchmaking_lock);
+}
+
+void matchmaking_clear_rejoin(void)
+{
+	pthread_mutex_lock(&matchmaking_lock);
+	matchmaking.rejoin_search = 0;
+	pthread_mutex_unlock(&matchmaking_lock);
+}
+
+int matchmaking_rejoin_pending(void)
+{
+	int pending;
+
+	pthread_mutex_lock(&matchmaking_lock);
+	pending = matchmaking.rejoin_search && matchmaking.playlist[0];
+	pthread_mutex_unlock(&matchmaking_lock);
+	return pending;
+}
+
+void matchmaking_mark_resume(void)
+{
+	pthread_mutex_lock(&matchmaking_lock);
+	if (matchmaking.rejoin_search && matchmaking.playlist[0])
+	{
+		copy_short(matchmaking.resume_playlist, (int)sizeof(matchmaking.resume_playlist),
+			matchmaking.playlist, 15);
+		matchmaking.resume_ui = 1;
+	}
+	matchmaking.rejoin_search = 0;
+	pthread_mutex_unlock(&matchmaking_lock);
+}
+
+int matchmaking_take_resume(char *playlist, int size)
+{
+	int resume;
+
+	pthread_mutex_lock(&matchmaking_lock);
+	resume = matchmaking.resume_ui && matchmaking.resume_playlist[0];
+	if (resume && playlist && size > 0)
+		copy_short(playlist, size, matchmaking.resume_playlist, 15);
+	matchmaking.resume_ui = 0;
+	pthread_mutex_unlock(&matchmaking_lock);
+	return resume;
 }
 
 int matchmaking_name_is_filler(const wchar_t *name)
@@ -2054,9 +1452,18 @@ void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, 
 	const char *match)
 {
 	struct matchmaking_offer offer;
+	int party_humans;
+	int seconds;
+	char remote[MATCHMAKING_LOBBY_NAMES][12];
+	int remote_count;
 
 	if (!playlist || !playlist[0])
 		return;
+	/* mesh calls take mesh_lock. that lock is not taken while matchmaking_lock
+	is already held. */
+	party_humans = peer_mesh_party_size();
+	seconds = peer_mesh_search_seconds();
+	remote_count = peer_mesh_party_names(remote, MATCHMAKING_LOBBY_NAMES);
 	pthread_mutex_lock(&matchmaking_lock);
 	if (!matchmaking.queueing || !matchmaking.ready)
 	{
@@ -2066,6 +1473,9 @@ void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, 
 	if (!host && (matchmaking.offer.role == MATCHMAKING_ROLE_JOIN ||
 		matchmaking.offer.role == MATCHMAKING_ROLE_SERVER) && matchmaking.offer.invite[0])
 	{
+		/* a later offer can replace the address. the match itself stays. */
+		if (invite && invite[0])
+			copy_short(matchmaking.offer.invite, (int)sizeof(matchmaking.offer.invite), invite, 159);
 		pthread_mutex_unlock(&matchmaking_lock);
 		return;
 	}
@@ -2097,20 +1507,29 @@ void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, 
 				break;
 			match_bytes[index / 2] = (unsigned char)((high << 4) | low);
 		}
-		copy_short(offer.map, (int)sizeof(offer.map), mesh_map_for(match_bytes), 31);
+		copy_short(offer.map, (int)sizeof(offer.map), mesh_map_for(match_bytes, playlist), 31);
 		rules_default(&offer.rules, offer.playlist, offer.map);
 		mesh_loadout(match_bytes, offer.playlist, &offer.rules.primary, &offer.rules.secondary);
-		humans = peer_mesh_party_size();
+		humans = party_humans;
+		if (matchmaking.rematch_players > 1)
+		{
+			/* the people sitting now. their names stay, so a team game still
+			knows who is on which side. the countdown follows this count, not
+			those names. */
+			humans = matchmaking.players;
+		}
+		else if (humans < matchmaking.players)
+			humans = matchmaking.players;
 		if (humans < 1)
 			humans = 1;
 		offer.joined = humans;
-		offer.wait_seconds = mesh_wait_seconds(offer.playlist, humans, players_for(offer.playlist),
-			peer_mesh_search_seconds());
+		offer.wait_seconds = seated_wait_locked(offer.playlist, humans, players_for(offer.playlist),
+			seconds);
 	}
 	offer.players = players_for(offer.playlist);
 	offer.teams = offer.rules.teams;
 	offer.team_size = offer.teams ? 2 : 1;
-	offer.local_max = 4;
+	offer.local_max = local_cap_for(offer.playlist);
 	offer.bots = 0;
 	{
 		struct rank_account account;
@@ -2118,8 +1537,6 @@ void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, 
 		rank_account_get(&account);
 		if (matchmaking.name[0])
 		{
-			char remote[8][12];
-			int remote_count = 0;
 			int remote_index;
 
 			copy_short(offer.names[0], (int)sizeof(offer.names[0]), matchmaking.name, 11);
@@ -2129,7 +1546,6 @@ void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, 
 			actually in the lobby. */
 			offer.name_party[0] = 0;
 			offer.party_count = 1;
-			remote_count = peer_mesh_party_names(remote, 8);
 			for (remote_index = 0; remote_index < remote_count && offer.name_count < MATCHMAKING_LOBBY_NAMES;
 				remote_index++)
 			{
@@ -2155,6 +1571,7 @@ void matchmaking_note_mesh(int host, const char *playlist, unsigned short port, 
 			offer.card_count = 1;
 		}
 	}
+	offer.host_seats = matchmaking.locals;
 	matchmaking.offer = offer;
 	matchmaking.offer_ready = 1;
 	pthread_mutex_unlock(&matchmaking_lock);
@@ -2227,6 +1644,8 @@ void matchmaking_leave(void)
 	matchmaking.ready = 0;
 	matchmaking.offer_ready = 0;
 	matchmaking.accept_offers = 0;
+	matchmaking.rejoin_search = 0;
+	matchmaking.rematch_players = 0;
 	if (!matchmaking.committed)
 	{
 		hosted_drop_locked();
@@ -2235,6 +1654,7 @@ void matchmaking_leave(void)
 			matchmaking.want_clear = 1;
 	}
 	pthread_mutex_unlock(&matchmaking_lock);
+	network_votekick_clear_local_blocks();
 	peer_mesh_stop();
 }
 
@@ -2253,10 +1673,13 @@ void matchmaking_reset(void)
 	matchmaking.offer_ready = 0;
 	matchmaking.accept_offers = 0;
 	matchmaking.game_port = 0;
+	matchmaking.rejoin_search = 0;
+	matchmaking.rematch_players = 0;
 	matchmaking.search++;
 	if (matchmaking.published_queue)
 		matchmaking.want_clear = 1;
 	pthread_mutex_unlock(&matchmaking_lock);
+	network_votekick_clear_local_blocks();
 	screen_party_clear();
 	rank_search_clear();
 	peer_mesh_stop();
@@ -2272,6 +1695,9 @@ void matchmaking_stop(void)
 	if (!matchmaking.queueing && !matchmaking.published_queue)
 	{
 		pthread_mutex_unlock(&matchmaking_lock);
+		/* a map that is not the queued mesh match. its scoreboard stays local. */
+		peer_mesh_drop_match();
+		rank_match_close();
 		return;
 	}
 	offer = matchmaking.offer;
@@ -2284,14 +1710,24 @@ void matchmaking_stop(void)
 	/* the match started and this machine is still the host, so the invite stays.
 	the game is loading. a later leave of a menu must not drop the port. */
 	matchmaking.committed = 1;
+	matchmaking.rematch_players = 0;
 	matchmaking.search++;
 	pthread_mutex_unlock(&matchmaking_lock);
 	peer_mesh_stop();
-	note = rank_match_begin(offer.match, offer.playlist, offer.teams);
-	if (note)
+	if (offer.match[0] && peer_mesh_match_is(offer.match))
 	{
-		for (index = 0; index < offer.card_count && index < MATCHMAKING_CARDS; index++)
-			rank_match_note(offer.cards[index].name, offer.cards[index].account, offer.cards[index].level);
+		note = rank_match_begin(offer.match, offer.playlist, offer.teams);
+		if (note)
+		{
+			for (index = 0; index < offer.card_count && index < MATCHMAKING_CARDS; index++)
+				rank_match_note(offer.cards[index].name, offer.cards[index].account, offer.cards[index].level);
+		}
+		peer_mesh_arm_late_offer();
+	}
+	else
+	{
+		peer_mesh_drop_match();
+		rank_match_close();
 	}
 }
 
@@ -2300,6 +1736,7 @@ void matchmaking_commit_join(void)
 	pthread_mutex_lock(&matchmaking_lock);
 	matchmaking.committed = 1;
 	matchmaking.in_party = 1;
+	matchmaking.rejoin_search = 0;
 	hosted_drop_locked();
 	pthread_mutex_unlock(&matchmaking_lock);
 }
@@ -2314,6 +1751,7 @@ void matchmaking_joined_link(void)
 	matchmaking.accept_offers = 0;
 	matchmaking.offer_ready = 0;
 	matchmaking.joined_link = 1;
+	matchmaking.rejoin_search = 0;
 	hosted_drop_locked();
 	pthread_mutex_unlock(&matchmaking_lock);
 }
@@ -2366,7 +1804,9 @@ void matchmaking_party_offer(struct matchmaking_offer *offer, const struct match
 	if (!port)
 		port = playlist_port(row->id);
 	offer->port = port;
-	offer->players = row->players > 1 ? row->players : players_for(row->id);
+	offer->players = players_for(row->id);
+	if (row->players > 1 && strcmp(row->id, "ffa") != 0)
+		offer->players = row->players;
 	offer->teams = row->teams;
 	offer->team_size = row->team_size > 0 ? row->team_size : offer->teams ? 2 : 1;
 	offer->local_max = row->local_max > 0 ? row->local_max : 4;
@@ -2455,6 +1895,24 @@ unsigned short matchmaking_game_port(void)
 	return matchmaking.game_port;
 }
 
+int matchmaking_voice_open(void)
+{
+	struct matchmaking_offer offer;
+
+	if (!matchmaking_game_port() || !matchmaking_offer_copy(&offer))
+		return 0;
+	return !strcmp(offer.playlist, "ffa");
+}
+
+int matchmaking_comms_team(void)
+{
+	struct matchmaking_offer offer;
+
+	if (!matchmaking_game_port() || !matchmaking_offer_copy(&offer))
+		return 0;
+	return !strcmp(offer.playlist, "hardcore") || !strcmp(offer.playlist, "ranked");
+}
+
 void matchmaking_set_game_port(unsigned short port)
 {
 	/* 5150 is an ordinary lobby. 5151 is this machine's client port. */
@@ -2494,19 +1952,29 @@ static int party_seat(const struct matchmaking_offer *offer, int party)
 	int index;
 	int which;
 
+	int host_names;
+	int host_seats;
+
 	if (party <= 0)
 		return 0;
 	if (party == 1)
 		return 1;
+	host_seats = offer->host_seats;
+	if (host_seats < 1)
+		host_seats = 1;
+	if (host_seats > 4)
+		host_seats = 4;
+	host_names = 0;
 	counts[0] = 0;
 	counts[1] = 0;
 	for (index = 0; index < offer->name_count && index < MATCHMAKING_LOBBY_NAMES; index++)
 	{
 		if (offer->name_party[index] == 0)
-			counts[0]++;
+			host_names++;
 		else if (offer->name_party[index] == 1)
 			counts[1]++;
 	}
+	counts[0] = host_names > host_seats ? host_names : host_seats;
 	for (which = 2; which <= party && which < 4; which++)
 	{
 		int members = 0;
@@ -2648,8 +2116,25 @@ int matchmaking_may_count(int player_count, int maximum_players)
 	/* the private lobby omits wait_seconds. it does not start. */
 	if (offer.phase == MATCHMAKING_PHASE_PARTY || !matchmaking_is_ready())
 		return 0;
+	/* a rematch stays stopped while fewer people are seated than finished it,
+	even if the offer still says the lobby is ready. */
+	{
+		int rematch;
+
+		pthread_mutex_lock(&matchmaking_lock);
+		rematch = matchmaking.rematch_players;
+		pthread_mutex_unlock(&matchmaking_lock);
+		if (rematch > 1 && player_count < rematch)
+			return 0;
+	}
 	if (offer.wait_seconds >= 0)
-		return 1;
+	{
+		/* 2v2 and Ranked start when four are actually seated. Free for all
+		starts once two are seated. */
+		if (!strcmp(offer.playlist, "ranked") || !strcmp(offer.playlist, "hardcore"))
+			return offer.players > 0 && player_count >= offer.players;
+		return player_count >= 2;
+	}
 	/* Find Game, and the seats already fill the cap. an omitted wait starts then. */
 	return maximum_players > 0 && player_count >= maximum_players &&
 		offer.phase == MATCHMAKING_PHASE_SEARCH;
@@ -2724,6 +2209,21 @@ int matchmaking_wait_omitted(void)
 	if (!matchmaking_offer_copy(&offer))
 		return 0;
 	return offer.wait_seconds < 0 && offer.phase == MATCHMAKING_PHASE_SEARCH;
+}
+
+int matchmaking_seats_unfilled(int present)
+{
+	struct matchmaking_offer offer;
+
+	if (!matchmaking_offer_copy(&offer))
+		return 0;
+	if (!mesh_seats_unfilled(offer.joined, offer.players, present))
+		return 0;
+	/* Free for all starts with the people who reached the lobby once two are here.
+	2v2 and Ranked keep waiting until the advertised seats are actually filled. */
+	if (!strcmp(offer.playlist, "ffa") && present >= 2)
+		return 0;
+	return 1;
 }
 
 unsigned long matchmaking_countdown_ms(void)

@@ -501,6 +501,44 @@ void rank_account_get(struct rank_account *out)
 	rank_unlock();
 }
 
+static int rank_mesh_id_ok(const char *mesh_id)
+{
+	int index;
+
+	if (!mesh_id || mesh_id[0] != 'M')
+		return 0;
+	for (index = 1; index < 9; index++)
+	{
+		char character = mesh_id[index];
+
+		if (!((character >= '0' && character <= '9') || (character >= 'A' && character <= 'F')))
+			return 0;
+	}
+	return mesh_id[9] == 0;
+}
+
+void rank_account_remember_mesh(const char *mesh_id)
+{
+	int index;
+
+	if (!rank_mesh_id_ok(mesh_id))
+		return;
+	rank_lock();
+	if (!rank_state.current_path[0] || !strcmp(rank_state.current.core, mesh_id))
+	{
+		rank_unlock();
+		return;
+	}
+	rank_copy_text(rank_state.current.core, (int)sizeof(rank_state.current.core), mesh_id);
+	rank_save_path(rank_state.current_path, &rank_state.current);
+	for (index = 0; index < rank_state.party_count; index++)
+	{
+		if (!strcmp(rank_state.party_path[index], rank_state.current_path))
+			rank_copy_text(rank_state.party[index].core, (int)sizeof(rank_state.party[index].core), mesh_id);
+	}
+	rank_unlock();
+}
+
 void rank_emblem_step(int field, int delta)
 {
 	int *value;
@@ -1280,6 +1318,19 @@ int rank_match_begin(const char *match, const char *playlist, int teams)
 	rank_state.result_body[0] = 0;
 	rank_unlock();
 	return 1;
+}
+
+void rank_match_close(void)
+{
+	rank_lock();
+	if (!rank_state.result_sent)
+	{
+		rank_state.match_id[0] = 0;
+		rank_state.result_pending = 0;
+		rank_state.result_body[0] = 0;
+		rank_state.result_sent = 1;
+	}
+	rank_unlock();
 }
 
 void rank_match_note(const char *name, const char *account, int level)

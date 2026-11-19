@@ -56,7 +56,7 @@ MENUS = ROOT / "port/assets/menus"
 CE = MENUS / "ce"
 SVG_COPIES = MENUS / "svg"
 MAIN_MENU = "ui\\shell\\main_menu\\main_menu"
-TITLE_FONT = ROOT / "port/assets/fonts/OpenCE-Regular.ttf"
+TITLE_FONT = ROOT / "port/assets/fonts/MeshCE-Regular.ttf"
 # the widgets left out, with their pictures (and all they alone lead to):
 # the server browser's GameSpy logo, which the port has no use for, and the
 # main menu's Credits, which the Xbox's game has not
@@ -340,7 +340,7 @@ class Art:
 
     def title(self, name: str, text: str) -> str:
         """a <bitmap> of a title this port has that the PC version has not:
-        the text set in OpenCE (the public-domain Newtown respaced, as the
+        the text set in MeshCE (the public-domain Newtown respaced, as the
         port's titles are: tools/title_assets.py) over the PC headers'
         backdrop"""
         from PIL import ImageDraw, ImageFont
@@ -690,12 +690,6 @@ def main() -> None:
         ((ROOT / "port/assets/icons/lucide" / f"{icon}.svg").read_text().replace('stroke="currentColor"',
                                                                                  'stroke="#FFFFFF"'), 24, 24)
         for icon in ("volume-2", "volume-x")]))
-    # (the main menu's MODS, in the redraws' own letters, and the mods'
-    # status icons: Lucide's, port/assets/icons/lucide)
-    lines.append(art.port_picture("main_menu/menu_mods", port_settings.menu_item_frames("MODS", art.redraws)))
-    lines.append(art.port_picture("mods/status", port_settings.mod_status_frames(ROOT / "port/assets/icons/lucide")))
-    lines.append(art.port_picture("mods/status_small",
-                                  port_settings.mod_status_frames(ROOT / "port/assets/icons/lucide", 16)))
     # (nothing: what a game map draws for a frame of ui.map's it has not,
     # menu_tags.c)
     lines.append(art.port_picture("blank", [

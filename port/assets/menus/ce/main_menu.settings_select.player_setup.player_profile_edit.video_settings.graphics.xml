@@ -15,20 +15,19 @@
 		<data input="port settings help"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_high_res_hud" x="54" y="73"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_hud_button_style" x="54" y="93"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_campaign_hud" x="54" y="113"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_high_res_text" x="54" y="133"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_anti_aliasing" x="54" y="153" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_anti_aliasing_android" x="54" y="153" platform="android"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_anisotropic_filtering" x="54" y="173"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_shadow_resolution" x="54" y="193"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_per_pixel_lighting" x="54" y="213"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_model_detail" x="54" y="233"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_match_timer" x="54" y="253"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_teammate_views" x="54" y="273"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_force_split" x="54" y="293"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_split_shared_only" x="54" y="313"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_teammate_view_slot" x="54" y="333"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_enabled" x="54" y="353"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_high_res_text" x="54" y="113"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_anti_aliasing" x="54" y="133" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_anti_aliasing_android" x="54" y="133" platform="android"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_anisotropic_filtering" x="54" y="153"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_shadow_resolution" x="54" y="173"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_per_pixel_lighting" x="54" y="193"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_model_detail" x="54" y="213"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_match_timer" x="54" y="233"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_teammate_views" x="54" y="253"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_force_split" x="54" y="273"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_split_shared_only" x="54" y="293"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_teammate_view_slot" x="54" y="313"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/op_enabled" x="54" y="333"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/button_bar" y="430"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">

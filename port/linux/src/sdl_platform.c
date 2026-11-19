@@ -18,7 +18,6 @@ and the debug keyboard that the game's console reads.
 #include "input_bindings.h"
 #include "p2p.h"
 #include "matchmaking.h"
-#include "port_mods.h"
 #include "xiso.h"
 #include "native_video.h"
 #include "native_input_events.h"
@@ -40,10 +39,26 @@ extern unsigned char network_chat_typing(void);
 #ifdef _WIN32
 /* port/windows/src/win32_window.c, compiled with the Windows SDK */
 void win32_window_borderless_apply(SDL_Window *window);
+int win32_tray_start(SDL_Window *window);
+int win32_tray_take_command(void);
 #endif
 #if defined(__linux__) && !defined(HALO_ARM64_GUEST) && !defined(HALO_ANDROID)
 #include <dlfcn.h>
 #include <unistd.h>
+#endif
+#if defined(__linux__) && !defined(HALO_ANDROID)
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char **environ;
+#endif
+#if defined(HALO_MACOS_GUEST)
+void host_sdl_background_game(void);
 #endif
 
 static SDL_Window *platform_window;
@@ -149,8 +164,7 @@ static void data_check_maps(void)
 
 	platform_maps_folder_check(&maps);
 	snprintf(where, sizeof(where),
-		"Put the Xbox maps from your Halo: Combat Evolved disc image in %s/maps. Halo Custom Edition "
-		"maps go in a custom_maps folder beside it.",
+		"Put the Xbox maps from your Halo: Combat Evolved disc image in %s/maps.",
 		maps.root);
 	switch (maps.state)
 	{
@@ -161,12 +175,12 @@ static void data_check_maps(void)
 		if (!maps.stray_pc_maps)
 			return;
 		snprintf(message, sizeof(message),
-			"These maps in the maps folder are Halo PC maps, which play only from custom_maps: %s%s.\n\n%s",
+			"These maps in the maps folder are Halo PC maps. This client plays the original Xbox maps: %s%s.\n\n%s",
 			maps.stray_names, maps.stray_pc_maps > PLATFORM_MAPS_FOLDER_NAMED ? " and more" : "", where);
 		platform_log("maps folder: %ld Halo PC maps in %s/maps (%s)", maps.stray_pc_maps, maps.root,
 			maps.stray_names);
 		if (!quiet)
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Halo", message, NULL);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "MeshCE", message, NULL);
 		return;
 	case _maps_folder_halo_pc:
 		snprintf(message, sizeof(message),
@@ -186,7 +200,7 @@ static void data_check_maps(void)
 		maps.ui_version);
 	platform_log("%s", message);
 	if (!quiet)
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", message, NULL);
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MeshCE", message, NULL);
 	exit(EXIT_FAILURE);
 }
 #endif
@@ -220,6 +234,181 @@ static void platform_choose_video_driver(void)
 }
 #endif
 
+#if defined(__linux__) && !defined(HALO_ANDROID)
+/* Wayland takes the icon from the desktop entry named by the app id, not
+from the window. The picture is the embedded PNG, and the entry's class is
+the same id SDL gives the compositor. */
+static void platform_mkdir_parents(const char *path)
+{
+	char buffer[1400];
+	size_t index, length;
+
+	if (snprintf(buffer, sizeof(buffer), "%s", path) >= (int)sizeof(buffer))
+		return;
+	length = strlen(buffer);
+	for (index = 1; index < length; index++)
+	{
+		if (buffer[index] != '/')
+			continue;
+		buffer[index] = '\0';
+		mkdir(buffer, 0755);
+		buffer[index] = '/';
+	}
+	mkdir(buffer, 0755);
+}
+
+/* a desktop entry that names only the dynamic linker does not start the
+game. the entry has to repeat the linker, its library path, and halo. */
+static int platform_linker_exec(char *exec_line, size_t size)
+{
+	char raw[2048];
+	const char *args[16];
+	const char *linker;
+	const char *library_path = NULL;
+	const char *halo = NULL;
+	ssize_t length;
+	ssize_t at;
+	int fd;
+	int count = 0;
+	int index;
+	int wrote;
+
+	fd = open("/proc/self/cmdline", O_RDONLY);
+	if (fd < 0)
+		return 0;
+	length = read(fd, raw, sizeof(raw) - 1);
+	close(fd);
+	if (length <= 0)
+		return 0;
+	raw[length] = '\0';
+	at = 0;
+	while (at < length && count < 16)
+	{
+		args[count++] = raw + at;
+		at += (ssize_t)strlen(raw + at) + 1;
+	}
+	if (count < 1)
+		return 0;
+	linker = args[0];
+	if (!strstr(linker, "ld-linux.so.2"))
+		return 0;
+	for (index = 1; index < count; index++)
+	{
+		if (!strcmp(args[index], "--library-path") && index + 1 < count)
+			library_path = args[++index];
+		else if (strlen(args[index]) >= 5 && !strcmp(args[index] + strlen(args[index]) - 5, "/halo"))
+			halo = args[index];
+	}
+	if (!library_path || !halo)
+		return 0;
+	wrote = snprintf(exec_line, size, "\"%s\" --library-path %s %s", linker, library_path, halo);
+	return wrote > 0 && (size_t)wrote < size;
+}
+
+static void platform_prepare_desktop_icon(void)
+{
+	char executable[1024];
+	char launcher[1100];
+	char icon_directory[1200];
+	char applications[1200];
+	char icon_path[1400];
+	char desktop_path[1400];
+	char exec_line[2048];
+	char entry[4096];
+	char existing[4096];
+	const char *data_home = getenv("XDG_DATA_HOME");
+	const char *home = getenv("HOME");
+	const char *program;
+	ssize_t length;
+	FILE *file;
+	size_t existing_length;
+
+	SDL_SetHint(SDL_HINT_APP_ID, "MeshCE");
+	if (!platform_window_icon_size)
+		return;
+	length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+	if (length <= 0)
+		return;
+	executable[length] = '\0';
+	snprintf(launcher, sizeof(launcher), "%s", executable);
+	{
+		char *slash = strrchr(launcher, '/');
+
+		if (!slash)
+			return;
+		if ((size_t)(slash + 1 - launcher) + strlen("MeshCE") >= sizeof(launcher))
+			return;
+		memcpy(slash + 1, "MeshCE", strlen("MeshCE") + 1);
+	}
+	program = access(launcher, X_OK) == 0 ? launcher : executable;
+	if (!platform_linker_exec(exec_line, sizeof(exec_line)))
+	{
+		int wrote = snprintf(exec_line, sizeof(exec_line), "\"%s\"", program);
+
+		if (wrote < 0 || (size_t)wrote >= sizeof(exec_line))
+			return;
+	}
+	if (data_home && *data_home)
+	{
+		snprintf(icon_directory, sizeof(icon_directory), "%s/icons/hicolor/256x256/apps", data_home);
+		snprintf(applications, sizeof(applications), "%s/applications", data_home);
+	}
+	else if (home && *home)
+	{
+		snprintf(icon_directory, sizeof(icon_directory), "%s/.local/share/icons/hicolor/256x256/apps", home);
+		snprintf(applications, sizeof(applications), "%s/.local/share/applications", home);
+	}
+	else
+		return;
+	platform_mkdir_parents(icon_directory);
+	platform_mkdir_parents(applications);
+	snprintf(icon_path, sizeof(icon_path), "%s/meshce.png", icon_directory);
+	snprintf(desktop_path, sizeof(desktop_path), "%s/MeshCE.desktop", applications);
+	file = fopen(icon_path, "wb");
+	if (!file)
+		return;
+	if (fwrite(platform_window_icon, 1, platform_window_icon_size, file) != platform_window_icon_size)
+	{
+		fclose(file);
+		return;
+	}
+	fclose(file);
+	snprintf(entry, sizeof(entry),
+		"[Desktop Entry]\n"
+		"Type=Application\n"
+		"Name=MeshCE\n"
+		"Comment=Halo: Combat Evolved\n"
+		"Exec=%s\n"
+		"Icon=%s\n"
+		"StartupWMClass=MeshCE\n"
+		"Terminal=false\n"
+		"Categories=Game;\n",
+		exec_line, icon_path);
+	file = fopen(desktop_path, "r");
+	if (file)
+	{
+		existing_length = fread(existing, 1, sizeof(existing) - 1, file);
+		fclose(file);
+		existing[existing_length] = '\0';
+		/* a later launch must not replace the linker command with the raw
+		binary, or with the linker path and nothing after it. */
+		if (strstr(existing, "ld-linux.so.2") && strstr(existing, "/halo"))
+			return;
+		if (!strcmp(existing, entry))
+			return;
+	}
+	file = fopen(desktop_path, "w");
+	if (!file)
+		return;
+	fputs(entry, file);
+	fclose(file);
+}
+#else
+static void platform_prepare_desktop_icon(void)
+{
+}
+#endif
+
 BOOL platform_sdl_initialize(void)
 {
 	if (platform_sdl_started)
@@ -229,18 +418,23 @@ BOOL platform_sdl_initialize(void)
 	the game (the game's sockets and Discord's pass MSG_NOSIGNAL, but UPnP's
 	miniupnpc does not, nor does a write to a closed pipe's standard error) */
 	signal(SIGPIPE, SIG_IGN);
+	/* hiding the last window keeps the process. Quit is the tray item. */
+	SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
 #endif
 	/* a copy of the game started to open an invite link hands it to the
 	one already running, and goes */
 	if (p2p_hand_off_invite())
 		exit(EXIT_SUCCESS);
-	SDL_SetHint(SDL_HINT_APP_NAME, "OpenCE");
+	SDL_SetHint(SDL_HINT_APP_NAME, "MeshCE");
+	platform_prepare_desktop_icon();
 	/* a notification or another app in front must not freeze the pad */
 	SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 #ifdef _WIN32
 	/* the keyboard keeps arriving while the window is in back */
 	SDL_SetHint("SDL_WINDOWS_RAW_KEYBOARD", "1");
 	SDL_SetHint("SDL_WINDOWS_RAW_KEYBOARD_INPUTSINK", "1");
+	/* hiding the last window keeps the process. Quit is the tray icon. */
+	SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
 #endif
 #ifdef HALO_ANDROID
 	/* landscape only; the back key arrives as a key event (xinput_sdl.c)
@@ -270,9 +464,6 @@ BOOL platform_sdl_initialize(void)
 	/* (a new version looked for meanwhile, updater_poll asking about it) */
 	updater_start();
 #endif
-	/* (the mods, and whether to play those that say they cannot be played
-	together, before the window opens: port_mods.c) */
-	port_mods_startup();
 	return TRUE;
 }
 
@@ -338,7 +529,7 @@ static BOOL data_extract(const char *image, const char *destination, char *error
 	/* (waited for through extraction.finished; the Windows port's threads
 	cannot be joined) */
 	pthread_detach(thread);
-	window = SDL_CreateWindow("OpenCE", 640, 150, 0);
+	window = SDL_CreateWindow("MeshCE", 640, 150, 0);
 	if (window)
 	{
 		renderer = SDL_CreateRenderer(window, NULL);
@@ -515,7 +706,7 @@ static void platform_offer_loading_picture(void)
 	}
 	for (;;)
 	{
-		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, NULL, "OpenCE", "", 2, buttons, NULL };
+		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, NULL, "MeshCE", "", 2, buttons, NULL };
 		char message[1400];
 		char image[1024];
 		char error[512];
@@ -550,7 +741,7 @@ static void platform_offer_loading_picture(void)
 			return;
 		}
 		platform_log("loading screen extraction failed: %s", error);
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenCE", error[0] ? error : "The loading screen picture could not be read.", NULL);
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MeshCE", error[0] ? error : "The loading screen picture could not be read.", NULL);
 	}
 }
 #endif
@@ -567,6 +758,7 @@ BOOL platform_offer_game_data(const char *destination)
 	BOOL image_found;
 
 	/* not for runs nobody is watching */
+	platform_prepare_desktop_icon();
 	if (config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
 		!SDL_Init(SDL_INIT_VIDEO))
 	{
@@ -576,7 +768,7 @@ BOOL platform_offer_game_data(const char *destination)
 	if (image_found)
 	{
 		snprintf(message, sizeof(message),
-			"OpenCE's game data (its maps folder) was not found.\n\n"
+			"MeshCE's game data (its maps folder) was not found.\n\n"
 			"Extract the maps folder from the Xbox disc image %s? "
 			"It is copied to %s/maps (about 2 GB).\n\n"
 			"(Or put the maps folder there yourself, or set paths.data in config.toml.)",
@@ -585,7 +777,7 @@ BOOL platform_offer_game_data(const char *destination)
 	else
 	{
 		snprintf(message, sizeof(message),
-			"OpenCE's game data (its maps folder) was not found.\n\n"
+			"MeshCE's game data (its maps folder) was not found.\n\n"
 			"Extract the maps folder from an Xbox disc image (.iso) of Halo: Combat Evolved? "
 			"It is copied to %s/maps (about 2 GB).\n\n"
 			"(Or put the maps folder there yourself, or set paths.data in config.toml.)",
@@ -593,7 +785,7 @@ BOOL platform_offer_game_data(const char *destination)
 	}
 	for (;;)
 	{
-		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, NULL, "OpenCE", message, 2, buttons, NULL };
+		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, NULL, "MeshCE", message, 2, buttons, NULL };
 		char image[1024];
 		char error[512];
 		int answer = 0;
@@ -619,10 +811,10 @@ BOOL platform_offer_game_data(const char *destination)
 			platform_log("no file dialog: %s", error);
 			snprintf(explanation, sizeof(explanation),
 				"No file dialog could be shown (%s).\n\n"
-				"Put the disc image (.iso) in %s and start OpenCE again, "
+				"Put the disc image (.iso) in %s and start MeshCE again, "
 				"or install zenity.",
 				error, destination);
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenCE", explanation, NULL);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MeshCE", explanation, NULL);
 			exit(EXIT_SUCCESS);
 		}
 		platform_log("extracting the maps folder from %s to %s", image, destination);
@@ -633,7 +825,7 @@ BOOL platform_offer_game_data(const char *destination)
 		}
 		platform_log("extraction failed: %s", error);
 		image_found = FALSE;
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenCE", error, NULL);
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MeshCE", error, NULL);
 	}
 }
 #endif
@@ -1154,7 +1346,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 
 		if (scale < 1)
 			scale = 1;
-		platform_window = SDL_CreateWindow("OpenCE", (int)(width * scale), (int)(height * scale),
+		platform_window = SDL_CreateWindow("MeshCE", (int)(width * scale), (int)(height * scale),
 #if defined(HALO_MACOS_NATIVE_METAL)
 			SDL_WINDOW_METAL
 #else
@@ -1174,7 +1366,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	(void)width;
 	(void)height;
 	platform_window_size_setting(&platform_window_width, &platform_window_height);
-	platform_window = SDL_CreateWindow("OpenCE", (int)platform_window_width, (int)platform_window_height,
+	platform_window = SDL_CreateWindow("MeshCE", (int)platform_window_width, (int)platform_window_height,
 		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
 		(config_boolean("debug.hidden_window") ? SDL_WINDOW_HIDDEN : 0) |
 		(platform_fullscreen_setting() ? SDL_WINDOW_FULLSCREEN : 0));
@@ -1767,7 +1959,7 @@ void platform_show_message(const char *title, const char *message)
 	pthread_mutex_lock(&platform_message_lock);
 	snprintf(platform_message_title, sizeof(platform_message_title), "%s", title);
 	snprintf(platform_message_text, sizeof(platform_message_text), "%s", message);
-	/* (streamer mode's words hidden here too: a map's or a mod's name) */
+	/* (streamer mode's words hidden here too) */
 	text_filter_utf8(platform_message_title);
 	text_filter_utf8(platform_message_text);
 	platform_message_pending = TRUE;
@@ -1879,13 +2071,356 @@ static void platform_show_pending_message(void)
 
 /* ---------- events */
 
-/* quits as closing the window does, when the events are next read (the
-menus' Quit: port/linux/game/menu_functions.c); on Android at once */
+#if defined(__linux__) && !defined(HALO_ANDROID)
+/* the desktop's tray libraries are 64-bit, and this game is 32-bit, so a
+64-bit helper holds the icon. Show puts the window back. Quit ends the process. */
+static const char tray_script[] =
+	"import sys, os, ctypes\n"
+	"fd = int(sys.argv[1])\n"
+	"def send(text):\n"
+	"    try:\n"
+	"        os.write(fd, text.encode())\n"
+	"    except OSError:\n"
+	"        sys.exit(0)\n"
+	"try:\n"
+	"    import gi\n"
+	"    gi.require_version('Gtk', '3.0')\n"
+	"    from gi.repository import Gtk, GLib\n"
+	"    lib = ctypes.CDLL('libayatana-appindicator3.so.1')\n"
+	"    Gtk.init([])\n"
+	"    lib.app_indicator_new.restype = ctypes.c_void_p\n"
+	"    lib.app_indicator_new.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]\n"
+	"    lib.app_indicator_set_status.argtypes = [ctypes.c_void_p, ctypes.c_int]\n"
+	"    lib.app_indicator_set_menu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]\n"
+	"    lib.app_indicator_set_title.argtypes = [ctypes.c_void_p, ctypes.c_char_p]\n"
+	"    ctypes.pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p\n"
+	"    ctypes.pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]\n"
+	"    menu = Gtk.Menu()\n"
+	"    loop = GLib.MainLoop()\n"
+	"    def on_show(_item):\n"
+	"        send('show\\n')\n"
+	"    def on_quit(_item):\n"
+	"        send('quit\\n')\n"
+	"        loop.quit()\n"
+	"    show = Gtk.MenuItem.new_with_label('Show MeshCE')\n"
+	"    show.connect('activate', on_show)\n"
+	"    menu.append(show)\n"
+	"    leave = Gtk.MenuItem.new_with_label('Quit MeshCE')\n"
+	"    leave.connect('activate', on_quit)\n"
+	"    menu.append(leave)\n"
+	"    menu.show_all()\n"
+	"    icon_file = sys.argv[2] if len(sys.argv) > 2 else ''\n"
+	"    icon_name = b'applications-games'\n"
+	"    icon_dir = b''\n"
+	"    if icon_file and os.path.isfile(icon_file):\n"
+	"        icon_dir = os.path.dirname(icon_file).encode()\n"
+	"        icon_name = os.path.splitext(os.path.basename(icon_file))[0].encode() or icon_name\n"
+	"    indicator = lib.app_indicator_new(b'meshce', icon_name, 0)\n"
+	"    if not indicator:\n"
+	"        send('fail\\n')\n"
+	"        sys.exit(1)\n"
+	"    if icon_dir:\n"
+	"        set_theme = getattr(lib, 'app_indicator_set_icon_theme_path', None)\n"
+	"        set_full = getattr(lib, 'app_indicator_set_icon_full', None)\n"
+	"        if set_theme and set_full:\n"
+	"            set_theme.restype = None\n"
+	"            set_theme.argtypes = [ctypes.c_void_p, ctypes.c_char_p]\n"
+	"            set_theme(indicator, icon_dir)\n"
+	"            set_full.restype = None\n"
+	"            set_full.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]\n"
+	"            set_full(indicator, icon_name, b'MeshCE')\n"
+	"    lib.app_indicator_set_status(indicator, 1)\n"
+	"    lib.app_indicator_set_title(indicator, b'MeshCE')\n"
+	"    pointer = ctypes.pythonapi.PyCapsule_GetPointer(menu.__gpointer__, None)\n"
+	"    if not pointer:\n"
+	"        send('fail\\n')\n"
+	"        sys.exit(1)\n"
+	"    lib.app_indicator_set_menu(indicator, pointer)\n"
+	"except Exception:\n"
+	"    send('fail\\n')\n"
+	"    sys.exit(1)\n"
+	"def hangup(_source, _condition):\n"
+	"    loop.quit()\n"
+	"    return False\n"
+	"GLib.io_add_watch(fd, GLib.PRIORITY_DEFAULT, GLib.IO_HUP | GLib.IO_ERR, hangup)\n"
+	"def announce():\n"
+	"    send('ready\\n')\n"
+	"    return False\n"
+	"GLib.idle_add(announce)\n"
+	"_keep = (menu, indicator)\n"
+	"loop.run()\n";
+
+static int tray_fd = -1;
+static pid_t tray_pid;
+static BOOL game_backgrounded;
+static BOOL background_was_fullscreen;
+
+static void platform_show_game(void)
+{
+	game_backgrounded = FALSE;
+	if (!platform_window)
+		return;
+	SDL_ShowWindow(platform_window);
+	SDL_RaiseWindow(platform_window);
+	if (background_was_fullscreen)
+		platform_window_set_fullscreen(TRUE);
+	platform_mouse_capture(FALSE);
+}
+
+static void tray_stop(void)
+{
+	if (tray_pid > 0)
+	{
+		kill(tray_pid, SIGTERM);
+		waitpid(tray_pid, NULL, 0);
+		tray_pid = 0;
+	}
+	if (tray_fd >= 0)
+	{
+		close(tray_fd);
+		tray_fd = -1;
+	}
+}
+
+static void tray_poll(void)
+{
+	char buf[64];
+	int n;
+
+	if (tray_fd < 0)
+		return;
+	n = (int)read(tray_fd, buf, sizeof(buf) - 1);
+	if (n < 0)
+		return;
+	if (n == 0)
+	{
+		close(tray_fd);
+		tray_fd = -1;
+		if (tray_pid > 0)
+		{
+			waitpid(tray_pid, NULL, WNOHANG);
+			tray_pid = 0;
+		}
+		if (game_backgrounded)
+		{
+			platform_log("The tray icon closed, so the window is back");
+			platform_show_game();
+		}
+		return;
+	}
+	buf[n] = 0;
+	if (strstr(buf, "quit"))
+	{
+		platform_log("Quit from the tray");
+		exit(EXIT_SUCCESS);
+	}
+	if (strstr(buf, "show"))
+		platform_show_game();
+}
+
+static int tray_wait_ready(void)
+{
+	char buf[64];
+	int got = 0;
+	int waited = 0;
+
+	buf[0] = 0;
+	while (waited < 3000)
+	{
+		struct pollfd ready;
+		int n;
+
+		ready.fd = tray_fd;
+		ready.events = POLLIN;
+		if (poll(&ready, 1, 200) > 0)
+		{
+			n = (int)read(tray_fd, buf + got, sizeof(buf) - 1 - got);
+			if (n <= 0)
+				return 0;
+			got += n;
+			buf[got] = 0;
+			if (strstr(buf, "fail"))
+				return 0;
+			if (strstr(buf, "ready"))
+				return 1;
+		}
+		waited += 200;
+	}
+	return 0;
+}
+
+/* the same file the desktop entry uses. the tray uses that picture when
+it is there, and the theme's applications-games icon when it is not. */
+static int platform_tray_icon_path(char *icon_path, size_t size)
+{
+	const char *data_home = getenv("XDG_DATA_HOME");
+	const char *home = getenv("HOME");
+	int wrote;
+
+	if (data_home && data_home[0])
+		wrote = snprintf(icon_path, size, "%s/icons/hicolor/256x256/apps/meshce.png", data_home);
+	else if (home && home[0])
+		wrote = snprintf(icon_path, size, "%s/.local/share/icons/hicolor/256x256/apps/meshce.png", home);
+	else
+		return 0;
+	if (wrote < 1 || (size_t)wrote >= size)
+		return 0;
+	return access(icon_path, R_OK) == 0;
+}
+
+static int tray_start(void)
+{
+	int fds[2];
+	char path[64];
+	char fdtext[16];
+	char icon_path[1400];
+	char *argv[5];
+	posix_spawn_file_actions_t actions;
+	FILE *file;
+	int spawned = 0;
+
+	if (tray_fd >= 0)
+		return 1;
+	snprintf(path, sizeof(path), "/tmp/meshce-tray-%d.py", (int)getpid());
+	file = fopen(path, "w");
+	if (!file)
+		return 0;
+	if (fwrite(tray_script, 1, sizeof(tray_script) - 1, file) != sizeof(tray_script) - 1)
+	{
+		fclose(file);
+		unlink(path);
+		return 0;
+	}
+	fclose(file);
+	/* AF_UNIX is 1. The game's headers already own the socket names, so this
+	is the socketpair system call itself. */
+	if (syscall(SYS_socketpair, 1, SOCK_STREAM, 0, fds) != 0)
+	{
+		unlink(path);
+		return 0;
+	}
+	/* a low number is the display connection by the time the helper starts */
+	snprintf(fdtext, sizeof(fdtext), "150");
+	if (!platform_tray_icon_path(icon_path, sizeof(icon_path)))
+		icon_path[0] = '\0';
+	argv[0] = "python3";
+	argv[1] = path;
+	argv[2] = fdtext;
+	argv[3] = icon_path;
+	argv[4] = NULL;
+	if (posix_spawn_file_actions_init(&actions) != 0)
+	{
+		close(fds[0]);
+		close(fds[1]);
+		unlink(path);
+		return 0;
+	}
+	posix_spawn_file_actions_addclose(&actions, fds[0]);
+	posix_spawn_file_actions_adddup2(&actions, fds[1], 150);
+	if (fds[1] != 150)
+		posix_spawn_file_actions_addclose(&actions, fds[1]);
+	if (posix_spawnp(&tray_pid, "python3", &actions, NULL, argv, environ) == 0)
+		spawned = 1;
+	posix_spawn_file_actions_destroy(&actions);
+	close(fds[1]);
+	if (!spawned)
+	{
+		close(fds[0]);
+		tray_pid = 0;
+		unlink(path);
+		return 0;
+	}
+	fcntl(fds[0], F_SETFL, O_NONBLOCK);
+	tray_fd = fds[0];
+	if (!tray_wait_ready())
+	{
+		tray_stop();
+		unlink(path);
+		return 0;
+	}
+	unlink(path);
+	return 1;
+}
+
+static void platform_background_game(void)
+{
+	if (game_backgrounded)
+		return;
+	if (!platform_window || !tray_start())
+	{
+		platform_log("MeshCE could not show a tray icon, so Quit exits");
+		exit(EXIT_SUCCESS);
+	}
+	background_was_fullscreen = platform_window_fullscreen();
+	if (background_was_fullscreen)
+		platform_window_set_fullscreen(FALSE);
+	platform_mouse_capture(FALSE);
+	SDL_HideWindow(platform_window);
+	game_backgrounded = TRUE;
+	platform_log("The window is hidden. MeshCE keeps introducing peers until you quit from the tray");
+}
+#endif
+
+#ifdef _WIN32
+static BOOL game_backgrounded;
+static BOOL background_was_fullscreen;
+
+static void platform_show_game(void)
+{
+	game_backgrounded = FALSE;
+	if (!platform_window)
+		return;
+	SDL_ShowWindow(platform_window);
+	SDL_RaiseWindow(platform_window);
+	if (background_was_fullscreen)
+		platform_window_set_fullscreen(TRUE);
+	platform_mouse_capture(FALSE);
+}
+
+static void platform_tray_poll(void)
+{
+	int command = win32_tray_take_command();
+
+	if (command == 2)
+	{
+		platform_log("Quit from the tray");
+		exit(EXIT_SUCCESS);
+	}
+	if (command == 1)
+		platform_show_game();
+}
+
+static void platform_background_game(void)
+{
+	if (game_backgrounded)
+		return;
+	if (!platform_window || !win32_tray_start(platform_window))
+	{
+		platform_log("MeshCE could not show a tray icon, so Quit exits");
+		exit(EXIT_SUCCESS);
+	}
+	background_was_fullscreen = platform_window_fullscreen();
+	if (background_was_fullscreen)
+		platform_window_set_fullscreen(FALSE);
+	platform_mouse_capture(FALSE);
+	SDL_HideWindow(platform_window);
+	game_backgrounded = TRUE;
+	platform_log("The window is hidden. MeshCE keeps introducing peers until you quit from the tray");
+}
+#endif
+
+/* the menu's Quit hides the window and leaves the mesh running. On Mac the
+menu-bar Quit MeshCE ends it. On Windows and Linux the tray's Quit MeshCE
+ends it. A machine that cannot show the tray still exits, so Quit is never stuck. */
 void platform_request_quit(void)
 {
-#ifdef HALO_ANDROID
+#if defined(HALO_MACOS_GUEST)
+	host_sdl_background_game();
+#elif defined(HALO_ANDROID)
 	/* (the guest has no SDL_PushEvent: exit ends the process, host_exit) */
 	exit(EXIT_SUCCESS);
+#elif defined(__linux__) || defined(_WIN32)
+	platform_background_game();
 #else
 	SDL_Event event;
 
@@ -1998,6 +2533,11 @@ void platform_pump_events(void)
 
 	if (!platform_window || SDL_GetCurrentThreadID() != platform_event_thread)
 		return;
+#if defined(__linux__) && !defined(HALO_ANDROID)
+	tray_poll();
+#elif defined(_WIN32)
+	platform_tray_poll();
+#endif
 	if (exit_ticks == (Uint64)-1)
 	{
 		double seconds = config_real("debug.exit_after");
@@ -2038,6 +2578,13 @@ void platform_pump_events(void)
 			pthread_mutex_unlock(&input_lock);
 			platform_log("window closed");
 			exit(EXIT_SUCCESS);
+#if (defined(__linux__) && !defined(HALO_ANDROID)) || defined(_WIN32)
+		case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+			pthread_mutex_unlock(&input_lock);
+			platform_background_game();
+			pthread_mutex_lock(&input_lock);
+			break;
+#endif
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP:
 #if !defined(HALO_ANDROID) || (defined(HALO_MACOS) && !defined(HALO_IOS))
@@ -2638,6 +3185,11 @@ void platform_input_read(struct platform_input_state *state, BOOL consume_motion
 			input_state.mouse_wheel = 0.0f;
 		}
 		pthread_mutex_unlock(&input_lock);
+#if defined(__linux__) && !defined(HALO_ANDROID)
+		tray_poll();
+#elif defined(_WIN32)
+		platform_tray_poll();
+#endif
 		return;
 	}
 	if (consume_motion)
@@ -2664,4 +3216,9 @@ void platform_input_read(struct platform_input_state *state, BOOL consume_motion
 		input_state.menu_back_pressed = FALSE;
 	}
 	pthread_mutex_unlock(&input_lock);
+#if defined(__linux__) && !defined(HALO_ANDROID)
+	tray_poll();
+#elif defined(_WIN32)
+	platform_tray_poll();
+#endif
 }

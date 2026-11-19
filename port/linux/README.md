@@ -158,8 +158,8 @@ Do the set-up in Desktop Mode: unpack the release, put `maps/` next to
 | `u:\` | `u/` in the save root. This folder contains the user data. |
 
 The save root is `paths.saves` in `config.toml`. If that setting is empty,
-the save root is `$XDG_DATA_HOME/halo-linux` (usually
-`~/.local/share/halo-linux`), the same folder OpenCE uses. Explicit
+the save root is `$XDG_DATA_HOME/meshce-mesh` (usually
+`~/.local/share/meshce-mesh`). Explicit
 `paths.saves` or `HALO_SAVE_ROOT` values select their exact folder.
 `config.toml` remains beside the executable so existing settings are read
 before selecting saves.
@@ -175,8 +175,7 @@ These files are in the data root:
 | `init.txt` | Console commands that the game does at start-up. For example, `map_name levels\a10\a10` starts the first campaign level. |
 
 The settings are in `config.toml` next to the executable. Refer to
-"Settings". Internet play's MQTT brokers are in `brokers.txt` next to it
-(`network.brokers_file`).
+"Settings".
 
 If the game stops because of a fatal signal, it writes the address and a
 backtrace to the standard error. To find the function at the address, enter
@@ -284,12 +283,8 @@ change. The screens open, close and move between each other as the PC
 version's. `display.menus = "xbox"` gives the Xbox's menus, which start every
 kind of game.
 
-The menus' text is in the language of the Custom Edition whose `loc.map` is
-in `custom_maps` (French, German, Italian, Spanish and so on), as that
-edition shows it: each of the PC version's texts is that `loc.map`'s
-(`display.menu_language`). Without one, and for the lines the port adds,
-it is English. The pictures with words in them (the screens' titles, the
-main menu's items) are drawn in English.
+The menus' text is English. The pictures with words in them (the screens'
+titles, the main menu's items) are drawn in English.
 
 Multiplayer > CO-OP CAMPAIGN is the Xbox's cooperative play, which the PC
 version does not have: two players on this computer play the campaign in
@@ -404,7 +399,7 @@ display. Firing, animation, sound and world lights continue.
 | `display.high_res_text` | `true` | `HALO_HIGH_RES_TEXT` | `true`: the menus' and HUD's text is drawn with the fonts in `port/assets/fonts` (Overpass, in place of the maps' Interstate) at the resolution the game draws at, laid out as before; the menus' titles are drawn from the high-res pictures in `port/assets/titles`, and the controller button icons from those in `port/assets/buttons`. `false`: the maps' bitmap fonts, titles and button icons. |
 | `display.shadow_resolution` | `128` | `HALO_SHADOW_RESOLUTION` | The size of the maps that the shadows of the objects are drawn in, in pixels each way: `128`, `256`, `512` or `1024` (other values go down to one of these). The game draws the shadow of each object into a map of 128x128 pixels, blurs it and projects it onto the ground. On a large screen, the edges of these shadows show steps that move when the object moves. A larger map makes the edges smooth; the blur is made wider to match, so the shadows are as soft as on the Xbox. Each doubling adds two passes of the blur. `128`: as on the Xbox. |
 | `display.menus` | `"pc"` | `HALO_MENUS` | `"pc"`: the PC version's menus, from the files in `port/assets/menus` and a `menus` folder next to `config.toml`. Refer to "Menus". `"xbox"`: the Xbox's menus. |
-| `display.menu_language` | `"maps"` | `HALO_MENU_LANGUAGE` | The PC menus' language. `"maps"`: the language of the Custom Edition whose `loc.map` is in `custom_maps` (English without one). `"english"`: English. The port's own lines are English. |
+| `display.menu_language` | `"english"` | `HALO_MENU_LANGUAGE` | The menus' language is English. |
 | `display.player_names` | `"all"` | `HALO_PLAYER_NAMES` | Whose names are drawn above their heads: `all`, `allies`, `enemies`, or `none`. A teammate's sits above the marker. An enemy's shows only within the motion sensor's reach, in sight, not camouflaged, and only when the tracker would show that player. |
 | `display.player_name_scale` | `1.0` | `HALO_PLAYER_NAME_SCALE` | Kept so an older config still loads. Names are drawn at the size of the name at the top of the screen. |
 | `display.match_timer` | `false` | `HALO_MATCH_TIMER` | `true`: a multiplayer game draws its clock at the bottom right, counting up from the game's first tick, which the items' respawn periods count from too: a weapon is back on the map at every multiple of its period on the clock. Campaign and co-op have none. MATCH TIMER in Video Setup > Graphics. |
@@ -465,14 +460,13 @@ display. Firing, animation, sound and world lights continue.
 | `network.text_chat` | `"on"` | `HALO_NET_TEXT_CHAT` | When you host: the text chat. `"on"`, lines with links refused; `"links"`, links allowed; `"off"`, no chat (in either case). Always off in a game listed in the server browser. TEXT CHAT on Server Setup, beside the invite link and LISTING (and on Hardcore's server page), writes ON or OFF here. A saved `"links"` shows as ON. Refer to "Text chat". |
 | `network.votekick` | `true` | `HALO_NET_VOTEKICK` | When you host: `true`, the players can vote to kick a player. Refer to "Security". `false`: no votes. VOTE KICK in Server Setup > Teamplay Options (in co-op, Voice and Voting) writes its choice here. |
 | `network.votekick_minutes` | `5` | `HALO_NET_VOTEKICK_MINUTES` | When you host: the minutes that a player must play on the server before the player can start a vote to kick (`0` to `60`). To vote, a player must play for 2 minutes, or for this time if it is less. A player kicked by a vote cannot join again for 1 hour the first time. Each further kick doubles that wait, and it stops growing at 7 days. |
-| `network.map_share` | `true` | `HALO_NET_MAP_SHARE` | When you host: send a player who joins without the game's Custom Edition map the map, and the resource maps that it needs and that the player does not have. SHARE MAPS in Server Setup > Map Sharing writes its choice here. Refer to "Map sharing". |
-| `network.map_share_upload` | `1024` | `HALO_NET_MAP_SHARE_UPLOAD` | When you host: the most kilobytes per second that the game sends of maps (`16` to `20480`, 20 MB/s). UPLOAD LIMIT in Server Setup > Map Sharing writes its choice here. |
-| `network.map_seed` | `true` | `HALO_NET_MAP_SEED` | When you play in the game of another machine: help send its map to players who join without it. HELP SEND MAPS in Settings > Network Setup > Map Sharing. |
-| `network.map_seed_upload` | `256` | `HALO_NET_MAP_SEED_UPLOAD` | When you play in the game of another machine: the most kilobytes per second that the game sends of maps to other players (`16` to `10240`, 10 MB/s). UPLOAD LIMIT in Settings > Network Setup > Map Sharing. |
-| `network.map_download` | `true` | `HALO_NET_MAP_DOWNLOAD` | When you join a game on a Custom Edition map that you do not have, the game asks the host for it. The host sends it when SHARE MAPS is on. A saved false does not stop the ask. |
+| `network.map_share` | `true` | `HALO_NET_MAP_SHARE` | Unused. This client does not send maps to other players. |
+| `network.map_share_upload` | `1024` | `HALO_NET_MAP_SHARE_UPLOAD` | Unused. This client does not send maps to other players. |
+| `network.map_seed` | `true` | `HALO_NET_MAP_SEED` | Unused. This client does not send maps to other players. |
+| `network.map_seed_upload` | `256` | `HALO_NET_MAP_SEED_UPLOAD` | Unused. This client does not send maps to other players. |
+| `network.map_download` | `true` | `HALO_NET_MAP_DOWNLOAD` | Unused. This client does not download maps from other players. |
 | `network.coop_public` | `false` | `HALO_NET_COOP_PUBLIC` | `true`: an online co-op game (Create Game > Internet, a SINGLEPLAYER map) starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in co-op's Server Setup writes its choice here. Refer to "Server browser". |
-| `network.brokers_file` | `"brokers.txt"` | `HALO_NET_BROKERS_FILE` | The file of the public MQTT brokers that let the machines of an invite find each other, and that carry the listings of the server browser: next to `config.toml`, unless a full path. One `host:port` on each line, up to 4; `#` starts a comment. |
-| `network.masters_file` | `"masters.txt"` | `HALO_NET_MASTERS_FILE` | The master servers the server browser asks for dedicated servers, next to `config.toml` unless a full path. One `https://` address and its `ed25519:` key on each line, up to 4. A file that names none leaves the official master. |
+| `network.masters_file` | `"masters.txt"` | `HALO_NET_MASTERS_FILE` | The master servers a server browser would ask for dedicated servers, next to `config.toml` unless a full path. One `https://` address and its `ed25519:` key on each line, up to 4. This build asks none. |
 | `network.stun_servers` | Google and Cloudflare | `HALO_NET_STUN` | The public STUN servers (`host:port`, with commas between them) that give the internet address of a machine. |
 | `discord.application_id` | the application of the project | `HALO_DISCORD_APPLICATION` | The Discord application for invites. Empty: no Discord. |
 | `update.auto` | `true` | `HALO_UPDATE_AUTO` | `true`: at start-up, the game looks for a new version. Refer to "Updates". `false`: the game does not look. |
@@ -681,7 +675,7 @@ To join a game, do one of these steps:
   file that only the user can read (`halo-ce-universal.key` in
   `$XDG_RUNTIME_DIR`, else `~/.halo-ce-universal.key`; on Windows in
   `%LOCALAPPDATA%`) encrypts the link, so the programs of other users
-  cannot read it. This is the same key file OpenCE uses.
+  cannot read it. This is the same key file MeshCE uses.
 - Copy the link (or the 64 digits) and go to the game.
 - Enter `halo <link>`.
 - Accept a Discord invite. Refer to "Discord".
@@ -854,144 +848,19 @@ The host sends each voice on to the players who can hear it. The host
 accepts a voice only from the machine of the player (with a key that it
 gives each machine on its connection), only at the quality it set, at most
 50 frames each second from a machine, and from at most 8 players at a time.
+A matchmaking free for all hears up to 16 at a time.
 The voices are compressed with Opus (`port/third_party/opus`).
 
 ### Server browser
 
-Server Setup in Create Game > Internet has a LISTING row:
+This client does not list public games and does not ask a master server.
+Join Game > Server Browser stays empty. A player joins from an invite link,
+or from Find Game on the peer mesh. There is no signalling broker.
 
-- PUBLIC (the default): the game also shows in Join Game > Server Browser
-  on every machine. Anyone can see and join the game.
-- PRIVATE: only players with the invite link can join.
+### Maps
 
-Each new game starts as PUBLIC (`network.host_public = false` makes new
-games start as PRIVATE). An online co-op game starts as PRIVATE, and keeps
-the last choice of its LISTING (`network.coop_public`). A LAN game is never listed. `network.public_lobby = false` turns the server browser off.
-
-A PUBLIC game can also have a PASSWORD (a row of Server Setup, below
-LISTING). The Server Browser shows a lock at the left of a game with a
-password. A player who selects that game must type the password, and JOIN
-GAME joins only with the correct password. The invite link of the game joins
-it without the password. The host keeps the password only while the game
-runs.
-
-In the Server Browser, as in Custom Edition's, a click selects a game
-(outlined in yellow), and a click on the selected game, a double click, A,
-Enter or JOIN joins it. The game joins the invite of the game, as for a
-link. When it reaches the host, it opens the lobby. If it cannot reach the
-host in 30 seconds, it marks the game FAILED; when this machine's NAT gives
-each destination its own port and no router forwards
-`network.tunnel_port`, the line below the games says so (turn on UPnP on
-the router, or forward the port: refer to "Connection").
-
-The PING column shows the round trip to each host in milliseconds. The
-browser times it as a join would reach the host: it makes the tunnel with
-the listing's invite, keeps the shortest of three pings, and closes the
-tunnel again. It times a few hosts at once, each again every two minutes
-and on REFRESH. Joining a host whose tunnel is open uses that tunnel. A
-game with a password, whose invite the listing hides, shows no ping, nor
-does a host not reached; a game that is full or starting shows CLOSED.
-REFRESH also asks the hosts for their listings again.
-
-How it operates (`src/p2p_lobby.c`):
-
-- The host of a public game publishes a listing: the invite, and the name,
-  map, gametype and player counts of the game. The listing goes to the
-  same MQTT brokers as the invites (`network.brokers_file`), retained,
-  to a topic of the host (`hceu/3/lobby/s/<hash of its key>`). A browser
-  asks hosts to publish again on `hceu/3/lobby/q`.
-- The key of the host signs the listing (Ed25519). The key is the key of the
-  invite, so no other machine can list the invite of the host, change its
-  listing, or list a game with false details.
-- The host publishes the listing again every 30 seconds, when the game
-  changes, and when a browser asks. If the topic of the host is empty or
-  holds another listing, the host publishes again in 5 seconds or less. Thus
-  a broker that deletes the listing does not remove the game.
-- When the host stops (it stops hosting, the game becomes private, or the
-  game quits), it publishes a closed listing, and then empties its topic.
-  If the host loses its connection, the broker empties its topic (the will
-  of the connection). A browser removes a game that it does not hear for 90
-  seconds.
-- When a public game becomes private, the host makes a new invite. Thus a
-  player who saw the listing cannot join with the old invite.
-- The listing of a game with a password does not hold the invite in clear
-  text. The secret part of the invite (its token) is encrypted with a key
-  from the password (Argon2id, salted with the key of the host, then
-  XChaCha20-Poly1305). The browser makes the key from the password that the
-  player types, and opens the invite only if the password is correct. When
-  the host sets or changes the password, it makes a new invite. A player who
-  has the listing can try passwords on their own machine without the host,
-  so use a long password.
-
-A public game does not publish the address of the host. But any machine
-with the invite can ask the host to connect, and the host then sends its
-addresses. Thus anyone can learn the address of the host of a public game,
-as for any public server.
-
-A dedicated server is listed by OpenCE's master servers, not on those
-brokers. While the server browser is open it asks the official master
-(`https://master.opencommunityedition.com`, or the masters in `masters.txt`
-next to `config.toml`: `network.masters_file`) and shows each dedicated
-server there, with the dedicated mark. Joining one uses the invite in that
-listing, the same way as a game heard on the brokers. The list is kept only
-when the master's pinned key signed it.
-
-The brokers are in `brokers.txt` next to the executable (from
-`port/assets/network/brokers.txt`; on Android, the app writes it next to
-`config.toml` at each start), one `host:port` on each line. The game uses
-all of them at once (up to 4), so one that works is enough. An update
-replaces `brokers.txt`: to use brokers of your own, put them in another
-file and name it in `network.brokers_file`. All the players must use the
-same broker to see each other's games. The game uses
-MQTT 5 if the broker has it, else MQTT 3.1.1. A broker that does not keep
-retained messages, or does not let clients subscribe with wildcards, carries
-only invites, not listings.
-
-### Map sharing
-
-When you join a game on a Custom Edition map that you do not have, the game
-downloads the map from the players of the game, if the host shares its maps
-(SHARE MAPS in Server Setup > Map Sharing, `network.map_share`, on by
-default). This operates on a local network and
-on the internet. It also downloads the resource maps that the map needs
-(`bitmaps.map`, `sounds.map`, `loc.map`) if you do not have them. A line at
-the top of the screen shows the progress. In the lobby, the game starts when
-every player has the map. If the game already operates, you join it when
-the download is complete. If no player sends any of the map for a minute,
-you leave the game, and the main menu tells you why. If the downloaded map
-cannot be played, the game deletes the files that it downloaded, and you
-leave the game.
-
-All the players help (HELP SEND MAPS in Settings > Network Setup > Map
-Sharing, `network.map_seed`), as the peers of a torrent do:
-the downloaded map comes in pieces from the host and from each player who
-has it or has a part of it. The game checks each piece against its hash, so
-a player cannot send a different map. A player who sends a bad piece is not
-asked again. To keep the upload free for the game, the host sends at most
-`network.map_share_upload` (1024 KB/s: UPLOAD LIMIT in Server Setup > Map
-Sharing) and each other player at most `network.map_seed_upload` (256 KB/s:
-UPLOAD LIMIT in Settings > Network Setup > Map Sharing). Set these lower on
-a slow connection. A client that does not have the map asks the host for
-it. The host sends it when SHARE MAPS is on.
-
-Maps keep their names. A game is on a map by its name (`hugeass`), and says
-which version of it by the start of the map's hash, so a game always loads
-the version of the host, whatever your copy is called. A downloaded map
-takes its own name (`hugeass.map`); if you have another version of that
-name, the download is named with the start of its hash
-(`hugeass_0e2b3ee4.map`), and the menus show it as "Hugeass (2)". A map that
-an earlier build renamed this way gets its name back, unless you have a map
-of that name. A download that stops leaves a `.part` file in `custom_maps`
-(only of the last map whose download stopped, and only if it holds part of
-the map); the next download of that map continues from it. The host shares
-maps in the folder of a Halo Custom Edition install (`paths.custom_edition`)
-too; downloads go to `custom_maps`.
-
-Over the internet, the players of a game connect only to the host. To send
-each other a map, a player answers the other players of the game (who have
-its invite) as the host does, and a player who downloads connects to them in
-the same way that it connected to the host. Map sharing uses port 5153 for
-its connections. Refer to `NETCODE.md`, "Map sharing".
+This client plays the original Xbox maps from the disc. It does not list,
+load, or download a Custom Edition map or a community map.
 
 ### Security
 
@@ -1004,20 +873,20 @@ Only machines with the invite can find the game:
 - The link contains a 16-byte hash of the public key of the host and a
   random 16-byte token. The identifier of the host is from the first 6
   bytes of the hash.
-- The machines exchange their public keys and addresses through public MQTT
-  brokers (`network.brokers_file`). The topics are HMACs of the token.
-  A key from the token encrypts and authenticates the messages
-  (`src/p2p_signal.c`, `src/p2p_crypto.c`). The host authenticates its answer
-  with a key that only it and the player can calculate. Its public key must
-  agree with the hash in the link. The hash is long, so no other machine can
-  find a key with the same hash.
+- The joiner sends the handshake to the address named in the link. A key
+  from the token encrypts and authenticates the messages (`src/p2p_signal.c`,
+  `src/p2p_crypto.c`). The host signs that answer with its mesh key, and
+  authenticates it with a key that only it and the player can calculate.
+  Its public key must agree with the hash in the link. The hash is long, so
+  no other machine can find a key with the same hash. The private mesh key
+  stays on the host. There is no signalling broker.
 - Then the player shows in the same way that it has the private key of its
   public key. Only then does the host make a session for the player. Thus
   other machines with the invite cannot make sessions in the name of a
   player (such a session would keep the player out).
 - Each two machines get the keys of their packets from their key pairs and
-  a random number from each. The keys do not go through the brokers. Thus
-  other machines with the invite cannot read or change the packets.
+  a random number from each. Those keys never travel. Thus other machines
+  with the invite cannot read or change the packets.
 - Each packet is encrypted and authenticated, with a different key in each
   direction. A machine ignores a packet that it already received. To and
   from a browser, the packets also go through DTLS, with the certificates
@@ -1029,10 +898,9 @@ Only machines with the invite can find the game:
 - The host tries to reach at most 8 new players at the same time. The
   other players ask again.
 - The host answers a request that is not proven at most one time each
-  second through each broker. It answers at most 20 of these requests each
-  second, after a first 32. Each answer goes only through the broker that
-  brought the request. Thus a flood of requests does not use much of the
-  bandwidth of the host.
+  second, and at most 20 of these requests each second after a first 32.
+  The answer goes back to the address the request came from. Thus a flood
+  of requests does not use much of the bandwidth of the host.
 - The host does the key work of at most 20 requests each second from keys
   that it does not know, after a first 32. It keeps the key work of the
   last 256 keys. Thus the proof of a player does not need more key work. A
@@ -1147,7 +1015,7 @@ In the game, each machine has an address in 100.64.0.0/10:
 ### Discord
 
 If the Discord desktop client operates, the game of the host shows in
-Discord as OpenCE, with the OpenCE icon, through the application of
+Discord as MeshCE, with the MeshCE icon, through the application of
 `discord.application_id`. The activity has a private party with the invite
 as its join secret. The host can send the invite, and a person who asks to
 join is let in. When that person accepts, they join the game. If the game
@@ -1227,18 +1095,8 @@ allowlist in `hs/hs.c`). They cannot call the functions for files, the
 saved state of the game, the console, debugging or cheats. A script that
 calls one does not run. The developer console can call every function.
 
-Halo Custom Edition maps get the same checks (those that need OpenSauce are
-refused). Their own loader (`game/cache_file_formats.c`) reads them into
-their tag cache at 0x40440000 and converts what Custom Edition lays out
-differently, then the validator checks their tags and each of their BSPs as
-it checks this build's maps, before the game converts their models, BSP
-geometry and scripts. Put them with `bitmaps.map`, `sounds.map` and
-`loc.map` in `custom_maps`, beside `maps`, or set `paths.custom_edition` to
-a Custom Edition install; the map lists show them as CUSTOM SINGLEPLAYER and
-CUSTOM MULTIPLAYER, played as campaign levels (alone, or as network co-op)
-or as multiplayer maps by their scenario type, and `game.custom_edition =
-false` refuses them. `map_validate` checks them too, with the resource maps
-beside each map or in `--maps <folder>`.
+This client plays the original Xbox maps. A Custom Edition map, a community
+map, or a map downloaded from another player is not listed and does not load.
 
 Defensive checks stay in the game code too. An index into a tag block, the
 tags or a tag's data that is out of range gets zeros (`tag_empty_data` in
@@ -1265,7 +1123,7 @@ crafted file) is refused, and the level starts over.
 | Game code | All 466 C files of the game. The changes are in "Game source changes". |
 | Graphics | Direct3D 8 on OpenGL 4.5 core through SDL3 (`src/d3d8_gl.c`). The port translates the NV2A vertex shaders and register combiners to GLSL. It decodes all the Xbox texture formats. The vertex and index buffers come from a GL copy of the Xbox memory. |
 | High-res HUD | On unless `display.high_res_hud` is false. The HUD assets are redraws at 8x the size of the maps' bitmaps (4x for the largest), in `port/assets/hud`. They cover the meters, counters, panels and their outlines, the motion sensor, reticles, waypoints and scopes, but no bitmap with English text. `tools/hud_assets.py` makes them from the SVG redraws (the weapons' reticles from those of the PC HUD sheet that match the Xbox's exactly, the rocket reticle and the sniper reticle and its 2x and 10x from the supplied pictures), and the build embeds them in the executable. When the game uploads one of those bitmaps, `src/hud_hires.c` gives the high-res texture in its place, if the bitmap's pixels are those of the English maps: another language's maps keep their own. The game sizes and places the HUD from its tags as before. `display.high_res_hud = false` turns this off. |
-| High-res text | The menus' and HUD's text is drawn with Overpass (`port/assets/fonts`, SIL Open Font License) in place of the maps' bitmap fonts, which are Interstate. `src/text_hires.c` rasterizes each glyph with stb_truetype (`port/third_party/stb`) at the resolution the game draws at, into an atlas that a placeholder bitmap of the game stands for. The game lays the text out from its font tags as before: each font is as tall as its tag's capitals, and narrowed where the tag's letters are narrower than the Xbox maps' (the fonts of a Custom Edition `loc.map`), so that its letters do not run into each other. The menus' titles (the screens' headers and the main menu's items) are pictures of text in the maps, so they are drawn as the high-res HUD is: `tools/title_assets.py` sets each one again in OpenCE, Roger White's public-domain Newtown respaced to match the maps' commercial title typeface (`tools/title_font.py`), at 4x the bitmap's size over its own plate or glow, each letter placed where the map's letter is, in `port/assets/titles`. The postgame carnage report's title is set over a hand-made SVG redraw of its panel (`port/assets/titles/svg`) instead. The A, B, X and Y button icons beside the menus' key labels and in their text ("Press A to Join") are drawn from hand-made SVG redraws at 8x the size of the maps' bitmaps (`port/assets/buttons`, made by `tools/button_assets.py`), in the same sizes and places. `display.high_res_text = false` turns it off. |
+| High-res text | The menus' and HUD's text is drawn with Overpass (`port/assets/fonts`, SIL Open Font License) in place of the maps' bitmap fonts, which are Interstate. `src/text_hires.c` rasterizes each glyph with stb_truetype (`port/third_party/stb`) at the resolution the game draws at, into an atlas that a placeholder bitmap of the game stands for. The game lays the text out from its font tags as before: each font is as tall as its tag's capitals, and narrowed where the tag's letters are narrower than the Xbox maps' (the fonts of a Custom Edition `loc.map`), so that its letters do not run into each other. The menus' titles (the screens' headers and the main menu's items) are pictures of text in the maps, so they are drawn as the high-res HUD is: `tools/title_assets.py` sets each one again in MeshCE, Roger White's public-domain Newtown respaced to match the maps' commercial title typeface (`tools/title_font.py`), at 4x the bitmap's size over its own plate or glow, each letter placed where the map's letter is, in `port/assets/titles`. The postgame carnage report's title is set over a hand-made SVG redraw of its panel (`port/assets/titles/svg`) instead. The A, B, X and Y button icons beside the menus' key labels and in their text ("Press A to Join") are drawn from hand-made SVG redraws at 8x the size of the maps' bitmaps (`port/assets/buttons`, made by `tools/button_assets.py`), in the same sizes and places. `display.high_res_text = false` turns it off. |
 | Anti-aliasing | Off unless `display.anti_aliasing` is set (`src/d3d8_gl.c`, `src/xgpu_post.c`). FXAA (written in the port) and SMAA (`port/third_party/smaa`, MIT licensed, at its HIGH preset, compiled as GLSL) are passes over the 3D view of each window, after the lens flares and before the HUD and the menus (`render/render.c`). Their programs are built when the setting is chosen. Supersampling draws the render targets the size of the screen at two times the resolution in each direction, and the display blit scales them down. Multisampling draws the back buffer and its depth buffer into multisampled renderbuffers, and with them any target that is drawn together with one of them (a mirror's view, in the secondary target with the back buffer's depth buffer), so that the attachments of a framebuffer are all multisampled or none is. A target's pixels are resolved into its texture before something reads the texture (as a texture, or at the display blit). Visibility tests count samples, divided by the samples of a pixel. An alpha-tested surface (foliage, grates) covers the samples of a pixel in proportion to its alpha past the reference (`gl_SampleMask`, not on Android). |
 | Sound | Xbox DirectSound on SDL3 audio (`src/dsound_sdl.c`): PCM and Xbox ADPCM, mixed at 48 kHz in stereo or 5.1, with volume, pitch, mix bins, distance, pan, occlusion and obstruction. There is no Doppler effect and no cones. On 5.1 the game gets the AC-3 speaker setting of the Xbox and sends its 2D sounds to the center and back speakers, 3D sounds pan across the five speakers, and the reverb plays from the front and back pairs. The game sends nothing to the LFE channel. |
 | Input | XInput on SDL3 (`src/xinput_sdl.c`): keyboard, mouse, gamepads with rumble, and the debug keyboard for the console. |
@@ -1362,9 +1220,8 @@ Other changes:
 | `cseries/errors.c` | `debug.txt` stays open between lines. |
 | `networking/`, `game/`, `interface/`, `bungie_net/network/` and the pools of objects, effects and sounds | The system link limits and the memory for them. |
 | `game/`, `objects/`, `units/`, `networking/` | The distributed netcode. Refer to `NETCODE.md`. |
-| `cache/cache_files.c` | When a map's tags load and unload, the port finds the bitmaps that the high-res HUD replaces (`game/hud_hires_tags.c`), adds the tags of the menus to the menus' map (`game/menu_tags.c`), and plays the mods' tags (`game/mods.c`). |
-| `cache/xbox_sound_cache.c`, `cache/xbox_texture_cache.c` | The samples of a mod's sound are copied from memory, and the pixels of a mod's bitmap read from its file and laid out for the hardware, at once (`game/mod_sounds.c`, `game/mod_bitmaps.c`); a mod's linear bitmap need not have rows of whole steps of the pitch. |
-| `hs/hs.c` | The console's `mods_reload`, `mods_enable` and `mods_list`, which a client may run too. |
+| `cache/cache_files.c` | When a map's tags load and unload, the port finds the bitmaps that the high-res HUD replaces (`game/hud_hires_tags.c`) and adds the tags of the menus to the menus' map (`game/menu_tags.c`). |
+| `hs/hs.c` | The console's `mods_reload`, `mods_enable` and `mods_list` stay, and do nothing. The map's own tags are played. |
 | `interface/ui_widget.c`, `interface/ui_widget_event_handler_functions.c`, `interface/ui_widget_game_data_input_functions.c` | The main menu is the PC version's from `port/assets/menus` (`display.menus`); the menus' widgets can call the port's functions (`game/menu_functions.c`) and send the PC version's custom activation event; the widgets' memory is 256 KB, not 16 KB; the main menu and Multiplayer clear co-op's controllers, so that a gamepad going back to controller 1 is not a controller unplugged; the lobby's split screen players leave alone, and one who quits in game is not joined to the next game (`interface/player_ui.c`). |
 | `interface/player_ui.c` | Fast setup opens the pregame screen through the port's menus (the lobby), as `interface/ui_widget.c` does. |
 | `input/input_abstraction.c`, `game/player_control.c`, `game/players.c`, `game/player_queues_new.c`, `units/units.h` | The keyboard and mouse's actions (`src/xinput_sdl.c`, `include/halo_keyboard.h`) join controller 1's game controls; their reload key reloads on its own, and their action key only acts (a control flag of the port's, sent with the player's action, stops the reload the controller's X falls back to). |
@@ -1387,7 +1244,7 @@ Other changes:
 | `rasterizer/xbox/rasterizer_xbox_widgets.c`, `objects/widgets/light_volumes.c` | A light volume's sprites (a plasma bolt's glow, a couple of hundred) are one draw. |
 | `rasterizer/rasterizer.h` | A frame holds 2048 transparent geometry groups, not 384 (`include/halo_port_capacity.h`): a co-op game with many added enemies asked for more, and the Xbox's pool drew the frame without the rest. |
 | `structures/structure_render.c` | The structure's visible surfaces are put in order by a radix sort, not `qsort_4byte`: the same order. |
-| `cache/cache_files.c`, `networking/network_client_manager.c`, `networking/network_server_manager.c`, `networking/network_server_message_handler.c`, `main/main.c`, `interface/interface.c` | Map sharing (`game/map_share.c`): a client that does not have the game's Custom Edition map asks the host for it instead of leaving, is not given time to precache it until it has it, and adds its players to a game in progress only then; the host gives the game's map its own name and its version (its hash's start), takes the requests from any machine in the game, lobby too, and does not drop a machine that downloads; the transfers run each frame, and their progress is drawn over the screen. |
+| `cache/cache_files.c`, `networking/network_client_manager.c`, `networking/network_server_manager.c`, `networking/network_server_message_handler.c`, `main/main.c`, `interface/interface.c` | A game loads an original Xbox map. A map that is not one of those is refused, and this client does not download a map from the other players. |
 | `cutscene/cinematics.c` | A scenario's titles (some Custom Edition maps show their name for the whole game) are not drawn over a menu, as the letterbox is not: the screen's overlays are drawn after the players' menus. |
 | `tag_files/tag_groups.h` | `TAG_BLOCK_GET_ELEMENT` returns an element in the block without a call, and calls `tag_block_get_element_with_size` for anything else. |
 | `main/main.c`, `interface/hud.c`, `interface/hud_unit.c`, `interface/hud_draw.c`, `game/game_engine.c` | The text chat of network games (`game/network_chat.c`): its keys are read each frame, and the debug keys are not while a line is typed; each view's HUD draws its lines, above the motion sensor, whose place the HUD notes (the left of the last picture drawn); the scoreboard's menu has Mute voice and chat, and the host's Mute for everyone. |

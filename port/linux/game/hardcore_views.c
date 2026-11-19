@@ -172,16 +172,18 @@ static void hardcore_views_slots_assign(void)
 /* Two panes are top and bottom. Three are a wide top and two bottoms.
 Four are the corners. The name is this machine's setting, so a bottom
 choice stays on a bottom pane instead of being moved to the top. */
-/* Force split stays off in matchmaking other than hardcore 2v2. A game
+/* Force split stays off in matchmaking other than 2v2 and Ranked. A game
 that is not matchmaking keeps the setting. Teammate panes are separate. */
 static boolean hardcore_views_client_split_applies(void)
 {
+	wchar_t const *name;
+
 	if (!matchmaking_game_port())
 		return TRUE;
 	if (!game_engine_running())
 		return FALSE;
-	return !ustrcmp(game_engine_get_variant()->human_readable_game_description, L"2v2") ||
-		!ustrcmp(game_engine_get_variant()->human_readable_game_description, L"Comp 2v2");
+	name = game_engine_get_variant()->human_readable_game_description;
+	return !ustrcmp(name, L"2v2") || !ustrcmp(name, L"Comp 2v2") || !ustrcmp(name, L"Ranked");
 }
 
 /* A team game has one team on this display. The other team's local player
@@ -384,12 +386,12 @@ static void hardcore_views_refresh(void)
 		hardcore_views_slots_release();
 		return;
 	}
-	/* outside matchmaking, and in hardcore matchmaking, Split Screen
-	still means this machine wants the panes. other matchmaking keeps
-	panes for the host and a lobby link, of the machines that sat here,
-	and a search does not get them. a pane in matchmaking stays black
-	when that player is not sharing. display.split_shared_only leaves
-	that teammate out instead, and the panes left are the smaller split. */
+	/* outside matchmaking, and in 2v2 and Ranked, Split Screen still means
+	this machine wants the panes. other matchmaking keeps panes for the
+	host and a lobby link, of the machines that sat here, and a search
+	does not get them. a pane in matchmaking stays black when that player
+	is not sharing. display.split_shared_only leaves that teammate out
+	instead, and the panes left are the smaller split. */
 	if (!matchmaking || hardcore_views_client_split_applies())
 	{
 		if (!config_boolean("display.teammate_views"))

@@ -424,8 +424,7 @@ uint32_t custom_edition_hud_definition_bytes(
 	uint32_t group_tag);
 /* Walks every placement of the HUD definition at `definition` (of group
 `group_tag`, a Custom Edition map's or this build's: they lie alike). The
-Custom Edition maps' conversion halves those Halo PC halves; mods scale those
-of their larger bitmaps (port/linux/game/mod_bitmaps.c). */
+Custom Edition maps' conversion halves those Halo PC halves. */
 void custom_edition_hud_placements_walk(
 	uint8_t *definition,
 	uint32_t group_tag,

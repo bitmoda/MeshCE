@@ -10,7 +10,7 @@ A program can still create its own P-256 key in ordinary memory.
 
 static NSData *peerTag(void)
 {
-	return [@"opence.peer.v1" dataUsingEncoding:NSUTF8StringEncoding];
+	return [@"meshce.peer.v1" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 static SecKeyRef peerPrivateKey(void)

@@ -42,11 +42,20 @@ boolean network_votekick_get_status(struct network_votekick_status *status);
 /* this machine votes against the player (absolute index): starts a vote,
 or votes in the one running; the host answers on the console */
 boolean network_votekick_request(short player_index);
-/* whether this machine hosts the game (its scoreboard offers Kick and Ban) */
+/* whether this machine hosts the game. a host counts votes and does not ban. */
 boolean network_votekick_host(void);
-/* (the host) kicks, or bans, the machine of the player (absolute index):
-its kick and ban commands' (network_server_manager.c) */
+/* kept so an old call refuses. a host does not kick or ban. */
 boolean network_votekick_host_kick(short player_index, boolean ban);
+/* a lobby vote against that machine. every player can start one. */
+boolean network_votekick_lobby_vote(short machine_index);
+/* a client's vote, which the lobby takes before the match clock runs. */
+boolean network_votekick_handles_message(word const *message, word size);
+/* ends a lobby vote that has run out of time. */
+void network_votekick_lobby_tick(void);
+/* a passed vote removed this local pad. the lobby does not sit it down again. */
+void network_votekick_block_local(short pad);
+boolean network_votekick_local_blocked(short pad);
+void network_votekick_clear_local_blocks(void);
 /* the console's "votekick <name>": the player of that name (or the one
 whose name begins with it) voted against */
 boolean network_votekick_player_named(char const *text);

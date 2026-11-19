@@ -17,11 +17,14 @@ does not know these messages drops them.
 #include "peer_mesh.h"
 #include "rank_result.h"
 
+#include <string.h>
+
 static short peer_vote_pending = -1;
 static short peer_vote_left = 0;
 static long peer_vote_sent = NONE;
 static long peer_id_host_sent = NONE;
 static long peer_id_client_sent = NONE;
+static unsigned long peer_lobby_sent = 0;
 /* a kick vote that already has enough votes; the ban waits for its reports */
 static long peer_ban_machine = NONE;
 static int peer_ban_players = 0;
@@ -48,6 +51,13 @@ static int peer_id_body(unsigned char *body, unsigned char const *key)
 	csmemcpy(body, peer_id_text, 16);
 	csmemcpy(body + 16, key, 32);
 	return 48;
+}
+
+/* The machine index is the last signed byte. A relay that moves the key
+onto another machine fails this check. */
+static void peer_id_sign_machine(unsigned char *signed_bytes, unsigned char machine)
+{
+	signed_bytes[48] = machine;
 }
 
 static int peer_report_body(unsigned char *body, unsigned char const *target)
@@ -82,22 +92,36 @@ static void peer_send_id(int host)
 		unsigned char signature[64];
 	} message;
 	unsigned char key[32];
-	unsigned char body[48];
+	unsigned char body[49];
+	short local = network_game_client_get_local_machine_index();
 	long *sent = host ? &peer_id_host_sent : &peer_id_client_sent;
 
 	if (*sent != NONE && game_time_get() - *sent < 2 * TICKS_PER_SECOND)
+		return;
+	if (!host && (local < 0 || local > 254))
 		return;
 	if (!peer_mesh_public(key))
 		return;
 	peer_id_body(body, key);
 	csmemset(&message, 0, sizeof(message));
-	message.machine = host ? 255 : 0;
+	message.machine = host ? 255 : (unsigned char)local;
+	peer_id_sign_machine(body, message.machine);
 	csmemcpy(message.key, key, 32);
-	if (!peer_mesh_sign(body, 48, message.signature))
+	if (!peer_mesh_sign(body, 49, message.signature))
 		return;
 	*sent = game_time_get();
 	distributed_send(&message, _distributed_message_peer_id, 1, (word)sizeof(message),
 		host ? _distributed_to_clients_reliably : _distributed_to_host_reliably);
+	/* 255 names the host for a report. The same key at this machine's index
+	is how the other clients pair the host with the players on the scoreboard. */
+	if (host && local >= 0 && local < 255)
+	{
+		message.machine = (unsigned char)local;
+		peer_id_sign_machine(body, message.machine);
+		if (peer_mesh_sign(body, 49, message.signature))
+			distributed_send(&message, _distributed_message_peer_id, 1, (word)sizeof(message),
+				_distributed_to_clients_reliably);
+	}
 }
 
 void network_peer_new_game(void)
@@ -107,6 +131,7 @@ void network_peer_new_game(void)
 	peer_vote_sent = NONE;
 	peer_id_host_sent = NONE;
 	peer_id_client_sent = NONE;
+	peer_lobby_sent = 0;
 	if (peer_ban_machine != NONE)
 		network_peer_consider(peer_ban_machine, peer_ban_players);
 	peer_ban_machine = NONE;
@@ -145,6 +170,35 @@ void network_peer_client_tick(void)
 		network_peer_vote(peer_vote_pending);
 }
 
+/* The lobby's clock does not move, so the in-game send would go out once.
+The ids are what the lobby rows show. */
+void network_peer_lobby_tick(void)
+{
+	unsigned long now = system_milliseconds();
+
+	if (peer_lobby_sent != 0 && now - peer_lobby_sent < 1000)
+		return;
+	peer_lobby_sent = now;
+	peer_id_host_sent = NONE;
+	peer_id_client_sent = NONE;
+	if (global_network_game_server_get())
+		peer_send_id(1);
+	else if (game_connection() == _game_connection_network_client)
+		peer_send_id(0);
+}
+
+boolean network_peer_handles_message(
+	word const *message,
+	word size)
+{
+	struct distributed_message_header header;
+
+	if (!message || size < sizeof(header))
+		return FALSE;
+	csmemcpy(&header, message, sizeof(header));
+	return header.type == _distributed_message_peer_id;
+}
+
 word network_peer_id_entry_size(void)
 {
 	return (word)(1 + 32 + 64);
@@ -158,7 +212,7 @@ word network_peer_report_entry_size(void)
 void network_peer_handle_id(long machine_index, void const *entries, int from_stream)
 {
 	unsigned char const *bytes;
-	unsigned char body[48];
+	unsigned char body[49];
 	struct
 	{
 		struct distributed_message_header header;
@@ -171,15 +225,25 @@ void network_peer_handle_id(long machine_index, void const *entries, int from_st
 		return;
 	bytes = (unsigned char const *)entries;
 	peer_id_body(body, bytes + 1);
-	if (!peer_mesh_verify(bytes + 1, body, 48, bytes + 33))
+	peer_id_sign_machine(body, bytes[0]);
+	if (!peer_mesh_verify(bytes + 1, body, 49, bytes + 33))
 		return;
 	if (game_connection() == _game_connection_network_server)
 	{
+		unsigned char self_key[32];
+
 		if (!from_stream || machine_index < 0 || machine_index > 255)
+			return;
+		/* The signed index is the connection this packet arrived on. */
+		if (bytes[0] != (unsigned char)machine_index)
+			return;
+		/* A client can repeat this host's id. That does not put the host's
+		install on the client's machine. */
+		if (peer_mesh_public(self_key) && !memcmp(self_key, bytes + 1, 32))
 			return;
 		peer_mesh_note_machine((int)machine_index, bytes + 1);
 		csmemset(&message, 0, sizeof(message));
-		message.machine = (unsigned char)machine_index;
+		message.machine = bytes[0];
 		csmemcpy(message.key, bytes + 1, 32);
 		csmemcpy(message.signature, bytes + 33, 64);
 		distributed_send(&message, _distributed_message_peer_id, 1, (word)sizeof(message),

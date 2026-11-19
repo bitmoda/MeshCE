@@ -83,6 +83,6 @@
 		<string text="BACKGROUND:"/>
 		<string text="SPRITE COLOR:"/>
 		<string text="SHAPE COLOR:"/>
-		<string text="CORE ID:"/>
+		<string text="MESH ID:"/>
 	</strings>
 </menus>

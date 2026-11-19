@@ -1146,7 +1146,23 @@ void main_menu_load(
 	hs_runtime_dispose_from_old_map();
 	hs_runtime_initialize_for_new_map();
 	main_globals.want_to_be_at_main_menu = FALSE;
+	{
+		extern void main_menu_resume_search(void);
 
+		main_menu_resume_search();
+	}
+
+	return;
+}
+
+void main_menu_scene_resume(
+	void)
+{
+	game_time_dispose_from_old_map();
+	game_time_initialize_for_new_map();
+	game_time_start();
+	hs_runtime_dispose_from_old_map();
+	hs_runtime_initialize_for_new_map();
 	return;
 }
 
@@ -1834,10 +1850,10 @@ static void main_native_build_label(char *label, size_t capacity)
 	platform = "Linux";
 	#endif
 	if (HALO_BUILD_NUMBER > 0)
-		_snprintf(label, capacity - 1, "OpenCE %s | build %d (%s)",
+		_snprintf(label, capacity - 1, "MeshCE %s | build %d (%s)",
 			platform, HALO_BUILD_NUMBER, HALO_BUILD_FLAVOR);
 	else
-		_snprintf(label, capacity - 1, "OpenCE %s | local build (%s)",
+		_snprintf(label, capacity - 1, "MeshCE %s | local build (%s)",
 			platform, HALO_BUILD_FLAVOR);
 	label[capacity - 1] = 0;
 }

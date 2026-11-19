@@ -1,17 +1,13 @@
-/* Server Setup's MODS, ALLOWED or NOT ALLOWED (network.mods_allowed).
-The host plays the map's own tags when mods are not allowed, and tells
-every client. A client answers. A machine that never answers is dropped,
-so an older client cannot keep its mods in that game. Allowing mods does
-not drop anyone. The network version stays as it is. */
+/* The host tells every other machine to play the map's own tags. A machine
+that does not answer is dropped, so an older client cannot keep its own
+tags in that game. The network version stays as it is. */
 #include "cseries.h"
 #include "errors.h"
 #include "game/game.h"
-#include "mods.h"
 #include "network_distributed.h"
 #include "network_mods.h"
 #include <string.h>
 
-int config_boolean(char const *name);
 short network_distributed_server_machines(long *machine_indices, short maximum);
 void network_game_server_kick_machine(long machine_index, boolean kept_out);
 boolean network_connection_last_read_was_unreliable(void);
@@ -32,53 +28,11 @@ struct mods_policy_message
 };
 typedef char mods_policy_message_size_assert[sizeof(struct mods_policy_message) == 12 ? 1 : -1];
 
-/* NONE until this host has sent a choice. 1 allowed, 0 not. */
+/* NONE until this host has sent the choice. The choice is always the map's own tags. */
 static short sent_allowed = NONE;
-static boolean heard = FALSE;
-static boolean host_forbids = FALSE;
-/* this match turned mods off, so leaving turns them back on */
-static boolean forced_off = FALSE;
 static byte acked[MODS_MACHINES];
 static unsigned long asked_ms[MODS_MACHINES];
 static unsigned long retry_ms[MODS_MACHINES];
-
-static boolean network_mods_forbidden(void)
-{
-	short connection = game_connection();
-
-	if (connection == _game_connection_network_server)
-		return config_boolean("network.mods_allowed") == 0;
-	if (connection == _game_connection_network_client && heard)
-		return host_forbids;
-	return FALSE;
-}
-
-static void network_mods_enforce(void)
-{
-	if (!mods_map_loaded())
-		return;
-	if (network_mods_forbidden())
-	{
-		mods_enable(FALSE);
-		forced_off = TRUE;
-		return;
-	}
-	if (forced_off)
-	{
-		mods_enable(TRUE);
-		forced_off = FALSE;
-	}
-}
-
-static void network_mods_left(void)
-{
-	heard = FALSE;
-	host_forbids = FALSE;
-	sent_allowed = NONE;
-	if (forced_off && mods_map_loaded())
-		mods_enable(TRUE);
-	forced_off = FALSE;
-}
 
 static void network_mods_send(long machine_index, int allowed)
 {
@@ -125,31 +79,22 @@ void network_mods_reset(void)
 	network_mods_clear_answers();
 }
 
-void network_mods_map_loaded(void)
-{
-	network_mods_enforce();
-}
-
 void network_mods_send_policy(long machine_index)
 {
-	int allowed;
-
 	if (game_connection() != _game_connection_network_server)
 		return;
-	allowed = config_boolean("network.mods_allowed") != 0;
-	sent_allowed = (short)allowed;
+	sent_allowed = 0;
 	if (machine_index >= 0 && machine_index < MODS_MACHINES)
 	{
 		acked[machine_index] = 0;
 		asked_ms[machine_index] = 0;
 	}
-	network_mods_send(machine_index, allowed);
+	network_mods_send(machine_index, 0);
 }
 
 void network_mods_update(void)
 {
 	short connection;
-	int allowed;
 	long machines[MODS_MACHINES];
 	short count;
 	short index;
@@ -159,21 +104,15 @@ void network_mods_update(void)
 	if (connection != _game_connection_network_server)
 	{
 		if (connection != _game_connection_network_client)
-			network_mods_left();
-		else
-			network_mods_enforce();
+			sent_allowed = NONE;
 		return;
 	}
-	allowed = config_boolean("network.mods_allowed") != 0;
-	if (sent_allowed != (short)allowed)
+	if (sent_allowed != 0)
 	{
-		sent_allowed = (short)allowed;
+		sent_allowed = 0;
 		network_mods_clear_answers();
-		network_mods_broadcast(allowed);
+		network_mods_broadcast(0);
 	}
-	network_mods_enforce();
-	if (allowed)
-		return;
 	now = system_milliseconds();
 	count = network_distributed_server_machines(machines, MODS_MACHINES);
 	for (index = 0; index < count; index++)
@@ -184,10 +123,10 @@ void network_mods_update(void)
 			machine == network_game_client_get_local_machine_index())
 			continue;
 		if (!asked_ms[machine] || now - retry_ms[machine] >= MODS_RETRY_MILLISECONDS)
-			network_mods_send(machine, allowed);
+			network_mods_send(machine, 0);
 		if (asked_ms[machine] && now - asked_ms[machine] >= MODS_DROP_MILLISECONDS)
 		{
-			error(_error_log, "machine #%ld did not confirm mods are off: dropped", machine);
+			error(_error_log, "machine #%ld did not confirm the map's own tags: dropped", machine);
 			network_game_server_kick_machine(machine, FALSE);
 			acked[machine] = 1;
 		}
@@ -222,9 +161,6 @@ void network_mods_handle_message(long machine_index, word const *data, word size
 		/* a client, and only from the host. another machine cannot set it. */
 		if (machine_index != NONE || game_connection() != _game_connection_network_client)
 			return;
-		heard = TRUE;
-		host_forbids = message.allowed == 0;
-		network_mods_enforce();
 		memset(&answer, 0, sizeof(answer));
 		answer.allowed = message.allowed;
 		distributed_send(&answer, _distributed_message_mods_ack, 1, sizeof(answer),

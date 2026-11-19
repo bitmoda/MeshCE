@@ -1455,6 +1455,8 @@ boolean map_share_download_begin(
 	boolean allowed = config_boolean("network.map_download") != 0 || download_button_allow;
 
 	download_button_allow = FALSE;
+	/* This client plays the original Xbox maps and does not download another. */
+	return FALSE;
 	if (!level_name || !custom_edition_level_name(level_name) || csstrlen(level_name) >= LEVEL_NAME_BYTES ||
 		!allowed || map_share_host() || !global_network_game_client_get() ||
 		!halo_custom_edition_tag_cache())
@@ -3280,6 +3282,8 @@ void map_share_handle_message(
 	anyone) */
 	if (!map_share_handles_message(message, size) || !from_stream)
 		return;
+	/* Map sharing is off. A request, an offer, or a progress note is ignored. */
+	return;
 	csmemcpy(&header, message, sizeof(header));
 	switch (header.type)
 	{
@@ -3358,6 +3362,8 @@ void map_share_update(
 	unsigned long host_address = map_share_host_address();
 	short index;
 
+	/* This client does not hash or send maps to the other players. */
+	return;
 	map_share_files_update();
 	/* (internet play: a player that shares answers the others, who reach it
 	by its key hash) */

@@ -99,7 +99,8 @@ static int cache_header(struct image *image, const unsigned char *header, const 
     if (memcmp(header,"daeh",4) || memcmp(header+2044,"toof",4) || u32(header+4)!=5)
         return fail(image,"%s is not an original Xbox Halo map. PC, Custom Edition, and MCC images are unsupported.",name);
     memcpy(build,header+64,32); build[32]=0;
-    if (strcmp(build,"01.01.14.2342") && strcmp(build,"01.10.12.2276"))
+    if (strcmp(build,"01.01.14.2342") && strcmp(build,"01.10.12.2276") &&
+        strcmp(build,"01.08.15.1749"))
         return fail(image,"Unsupported Xbox map build in %s. Use Halo: Combat Evolved PAL or NTSC-US.",name);
     return 1;
 }

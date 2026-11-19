@@ -2,14 +2,19 @@
 PEER_MESH.C
 
 Clients find each other without a server browser. Each one listens on UDP
-38952, says hello on the local network, and passes along the clients it has
-already met. A saved list is tried again later, which is as far as this
-reaches: two clients that are both behind routers still need a path between
-them, and this does not add one.
+38952, says hello on the local network, and passes along clients it has
+heard. Every client also says hello to the built-in introducer names.
+The saved list holds 2048 peers. Up to 64 of them are all contacted.
+A longer list is contacted in slices, and a peer that stays silent is dropped.
+A join also exchanges the public mesh address each client learned
+from STUN, and both try that port. Find Game stays off. A peer is saved
+after a hello from that peer arrives. Two clients that are both behind
+routers still need a path between them, and this does not add one.
 
-Find Game gathers the clients looking for the same playlist, times the
-round trip, and the best connection hosts. That client sends the invite it
-already makes for a party. The others join it.
+Find Game answers clients looking for the same playlist. A client fills a
+seat only by echoing the nonce in that answer. The search times the round
+trip, and the best connection hosts. That client sends the invite it already
+makes for a party. The others join it.
 
 The reputation id is this install's Ed25519 key. The seed is sealed to the
 machine's secure element when it has one: the Secure Enclave on a Mac, and
@@ -22,10 +27,14 @@ in ordinary memory.
 A report is a signature from a player in the match. It counts when that
 install also signed the scoreboard the mesh kept, and the votes are more
 than half of the installs that scoreboard names. A key that was not in that
-scoreboard cannot add a vote or stand in for a player. The same count
-removes the player from the game. A vote that falls short is kept. Thirty
-three of those votes ban the key, starting at the middle of the cooldown,
-16 hours. The first ban from a majority waits 1 hour. Each further ban
+scoreboard cannot add a vote or stand in for a player. The first player
+who left is one vote against that install. The earliest quit on the kept
+scoreboard is that vote, so the player who left does not have to sign it.
+A player who leaves later is not a vote. Votes already signed against
+that later player still count. Players who leave on the same tick are
+all first. One leave by itself stays short of a ban. The same count
+removes the player from the game. A vote that falls short is kept. Thirty three of those votes ban the key,
+starting at the middle of the cooldown, 16 hours. The first ban from a majority waits 1 hour. Each further ban
 doubles the wait, up to 7 days. During the wait the key is not matched.
 After it, the key is matched only when the search is otherwise short, and
 it does not host while anyone else can.
@@ -50,9 +59,11 @@ longer scoreboard is not.
 #include "rank_account.h"
 #include "networking/network_game_protocol.h"
 #include "halo_port_limits.h"
+#include "port_config.h"
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -92,8 +103,35 @@ enum
 	MESH_REPORT = 8,
 	MESH_RESULT = 9,
 	MESH_TALLY = 10,
+	/* Reply to a looking broadcast, and the reply to that reply. */
+	MESH_ANSWER = 11,
+	/* The rest of a scoreboard that does not fit in one tally packet. */
+	MESH_TALLY_PART = 12,
 	MESH_MAX_PACKET = 1200,
-	MESH_PEERS_MAX = 64,
+	/* Directory of peers this client can try. The announcement does not
+	   go to every entry once the list is longer than MESH_FULL_SEND. */
+	MESH_PEERS_MAX = 2048,
+	MESH_FULL_SEND = 64,
+	MESH_FANOUT = 48,
+	MESH_FANOUT_GREET = 16,
+	MESH_FANOUT_LIVE = 16,
+	/* One score, tally, or ban goes to peers heard recently, up to this many. */
+	MESH_REACH_SEND = 256,
+	/* A peer that has sent nothing for this long is dropped. A full
+	   directory is walked about every 10 minutes while idle, so this
+	   leaves several tries. */
+	MESH_STALE_SECONDS = 45 * 60,
+	/* An address this client never hears is dropped after this long.
+	   Introductions go out 16 at a time with the hello, so this still
+	   covers several passes of that queue. */
+	MESH_UNHEARD_SECONDS = 5 * 60,
+	/* With this many peers heard recently, the introducer is contacted
+	   about once a minute. Fewer than this, a packet that is already
+	   going out is copied there about every 3 seconds. */
+	MESH_SEED_SPARSE = 8,
+	MESH_SEED_BUSY_MS = 3000,
+	MESH_SEED_IDLE_MS = 60000,
+	MESH_SEED_PAIR_MS = 50,
 	MESH_CANDIDATES = 8,
 	MESH_GOSSIP = 8,
 	MESH_REPORTS = 16,
@@ -102,13 +140,32 @@ enum
 	MESH_MACHINES = 128,
 	MESH_STANDINGS = 128,
 	MESH_POLLS = 4,
-	MESH_VOTES = 8,
-	MESH_TALLY_TEXT = 896,
-	MESH_GATHER_MS = 3000,
-	MESH_PING_MS = 1500,
-	MESH_SCORE_MS = 1000,
+	MESH_VOTES = 16,
+	MESH_TALLY_TEXT = PEER_MESH_TALLY_TEXT,
+	/* A scoreboard past one packet is sent in pieces of this many bytes. */
+	MESH_TALLY_CHUNK = 1024,
+	MESH_TALLY_PARTS = 2,
+	MESH_TALLY_GATHER = 8,
+	MESH_GATHER_MS = 600,
+	MESH_PING_GAP_MS = 200,
+	MESH_PING_FLOOR_MS = 400,
+	MESH_PING_CAP_MS = 2500,
+	MESH_SCORE_MS = 250,
+	MESH_INVITE_YOUNG_MS = 1000,
+	MESH_INVITE_RETRY_MS = 500,
+	MESH_INVITE_EXPIRE_MS = 2000,
+	MESH_FIND_MS = 200,
+	MESH_FIND_OFFER_MS = 1000,
 	MESH_OFFER_MS = 15000,
-	MESH_HELLO_MS = 3000,
+	/* A lobby offer walks the directory while the lobby is open. */
+	MESH_WIDE_OFFER_MS = 2000,
+	/* After the match starts, the invite goes to the players already in it. */
+	MESH_LATE_OFFER_MS = 500,
+	/* A host lobby that still has only its own players then takes an offer. */
+	MESH_HOST_ALONE_MS = 8000,
+	MESH_HELLO_MS = 10000,
+	/* A direct address stands for this long. Only those peers are passed on. */
+	MESH_REACH_SECONDS = 30,
 	MESH_PHASE_IDLE = 0,
 	MESH_PHASE_COOLDOWN = 1,
 	MESH_PHASE_GATHER = 2,
@@ -127,8 +184,37 @@ struct mesh_peer
 	unsigned bans;
 	unsigned cooldown_until;
 	unsigned last_seen;
+	/* first FIND of this search. not saved. a claimed search age is not used. */
+	unsigned ranked_seen;
+	/* last looking broadcast. not saved. The address is the one that sent it. */
+	unsigned looking_at;
+	unsigned long looking_address;
+	unsigned short looking_port;
+	char looking_playlist[16];
+	char looking_name[12];
+	int looking_seats;
+	/* the score on the last looking broadcast. 0 is a real score. */
+	int looking_level;
+	int looking_level_known;
+	/* 1 once this peer has been on the saved peer list. */
+	int known;
+	unsigned char answer_nonce[16];
+	int answer_sent;
+	unsigned answer_at;
+	int answer_tries;
+	/* 1 after this client echoed their nonce. Their offer is the lobby it agreed to enter. */
+	int echoed;
+	/* The looking broadcast this nonce answered. A later broadcast does not move these. */
+	unsigned long answer_address;
+	unsigned short answer_port;
+	int answer_seats;
+	char answer_name[12];
 	int heard;
 	int used;
+	/* Unix time this slot was filled. Not written to peers.dat. */
+	unsigned noted;
+	/* 1 until an announcement has gone to this address. Not written. */
+	int greet;
 };
 
 struct mesh_candidate
@@ -157,8 +243,9 @@ struct mesh_vote
 	unsigned char key[32];
 	char name[12];
 	char text[MESH_TALLY_TEXT];
-	unsigned char raw[1152];
-	int raw_size;
+	unsigned char raw[MESH_TALLY_PARTS][MESH_MAX_PACKET];
+	int raw_size[MESH_TALLY_PARTS];
+	int raw_count;
 	int used;
 };
 
@@ -209,6 +296,11 @@ static struct
 	int started;
 	int socket;
 	int ready;
+	/* public address of this mesh socket, from STUN, network byte order */
+	unsigned long mapped_address;
+	unsigned short mapped_port;
+	int mapped;
+	int mapped_logged;
 	int have_key;
 	int bound;
 	unsigned char seed[32];
@@ -220,18 +312,40 @@ static struct
 	struct mesh_peer peers[MESH_PEERS_MAX];
 	int dirty;
 	unsigned last_hello;
+	/* 1 on announcements that carry the short peer list. */
+	int list_toggle;
+	int sweep;
+	int live_at;
+	int greet_at;
+	int announce;
+	int targets_ready;
+	int used_targets;
+	int target_count;
+	int targets[MESH_FANOUT];
+	unsigned last_seed;
+	unsigned seed_pair;
+	/* Hello clock for the introducer. A search packet uses last_seed and
+	   must not keep a hello from getting through. */
+	unsigned last_seed_hello;
+	/* 1 when the hello just sent also went to the introducer. */
+	int seed_sent;
 	unsigned last_offer;
+	unsigned last_find;
 	unsigned last_save;
 	int searching;
+	/* 1 after this search has drawn its known peers once. */
+	int drew;
 	int phase;
 	unsigned phase_at;
 	unsigned search_at;
-	int rank_extra;
-	unsigned rank_extra_at;
 	int account_level;
 	char account_name[12];
 	int seats;
 	int retries;
+	/* bumped when a search starts, ends, or is given up. a join copied
+	before that does not dial after the search has moved on. */
+	unsigned generation;
+	int give_up;
 	char playlist[16];
 	struct mesh_candidate candidates[MESH_CANDIDATES];
 	int we_host;
@@ -244,6 +358,16 @@ static struct
 	char invite[160];
 	int want_host_note;
 	int want_join_note;
+	int want_redial;
+	/* after the match starts, the host keeps sending the invite until this window ends */
+	int late_offer;
+	/* 1 while the matchmaking lobby has no seat left. offers wait for one. */
+	int lobby_full;
+	/* humans sitting in this host's game. 0 until the server says. */
+	int game_humans;
+	/* machines connected to this host's game, including this one. */
+	int game_machines;
+	unsigned late_offer_at;
 	unsigned self_bans;
 	unsigned self_until;
 	struct mesh_report reports[MESH_REPORTS];
@@ -409,61 +533,142 @@ static void load_peers(void)
 		peer->bans = read16(row + 38);
 		peer->cooldown_until = read32(row + 40);
 		peer->last_seen = read32(row + 44);
-		peer->heard = 1;
+		/* A row saved before a hello arrived has no time. Leave that slot
+		empty so it cannot crowd out a peer this client has heard. */
+		if (!peer->last_seen && !peer->bans && !peer->cooldown_until)
+		{
+			memset(peer, 0, sizeof(*peer));
+			continue;
+		}
+		peer->heard = peer->last_seen ? 1 : 0;
 		peer->used = 1;
+		peer->known = 1;
+		peer->noted = unix_now();
+		if (!peer->noted)
+			peer->noted = 1;
 	}
 	fclose(file);
+}
+
+/* The previous file stays until the new bytes are complete. A short write
+does not clear the dirty flag, and does not leave a header that claims
+rows the file does not hold. */
+static int replace_file(const char *path, const void *bytes, size_t size)
+{
+	char temporary[540];
+	FILE *file;
+	int path_len;
+	int wrote;
+
+	if (!path || !bytes)
+		return 0;
+	path_len = (int)strlen(path);
+	if (path_len <= 0 || path_len > 500)
+		return 0;
+	memcpy(temporary, path, (size_t)path_len);
+	memcpy(temporary + path_len, ".tmp", 5);
+	file = fopen(temporary, "wb");
+	if (!file)
+		return 0;
+	wrote = fwrite(bytes, 1, size, file) == size;
+	if (fclose(file) != 0)
+		wrote = 0;
+	if (!wrote)
+	{
+		remove(temporary);
+		return 0;
+	}
+#ifdef HALO_WINDOWS
+	if (!host_peer_replace(temporary, path))
+#else
+	if (rename(temporary, path) != 0)
+#endif
+	{
+		remove(temporary);
+		return 0;
+	}
+	return 1;
 }
 
 static void save_peers(void)
 {
 	char path[512];
-	FILE *file;
-	unsigned char header[8];
+	unsigned char *bytes;
 	int index;
 	int count = 0;
+	int size = 8;
 
 	if (!mesh.dirty)
 		return;
 	peers_path(path, (int)sizeof(path));
-	file = fopen(path, "wb");
-	if (!file)
-		return;
 	for (index = 0; index < MESH_PEERS_MAX; index++)
 	{
-		if (mesh.peers[index].used)
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (peer->used && ((peer->heard && peer->last_seen) || peer->bans || peer->cooldown_until))
 			count++;
 	}
-	memset(header, 0, sizeof(header));
-	memcpy(header, "OPPR", 4);
-	header[4] = 1;
-	header[5] = (unsigned char)count;
-	header[6] = (unsigned char)(count >> 8);
-	header[7] = (unsigned char)(count >> 16);
-	if (fwrite(header, 1, 8, file) != 8)
-	{
-		fclose(file);
+	bytes = malloc((size_t)(8 + count * 48));
+	if (!bytes)
 		return;
-	}
+	memset(bytes, 0, 8);
+	memcpy(bytes, "OPPR", 4);
+	bytes[4] = 1;
+	bytes[5] = (unsigned char)count;
+	bytes[6] = (unsigned char)(count >> 8);
+	bytes[7] = (unsigned char)(count >> 16);
 	for (index = 0; index < MESH_PEERS_MAX; index++)
 	{
-		unsigned char row[48];
 		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (!peer->used || !((peer->heard && peer->last_seen) || peer->bans || peer->cooldown_until))
+			continue;
+		memset(bytes + size, 0, 48);
+		memcpy(bytes + size, peer->key, 32);
+		write32(bytes + size + 32, (unsigned)peer->address);
+		write16(bytes + size + 36, peer->port);
+		write16(bytes + size + 38, (unsigned short)peer->bans);
+		write32(bytes + size + 40, peer->cooldown_until);
+		write32(bytes + size + 44, peer->last_seen);
+		size += 48;
+	}
+	if (!replace_file(path, bytes, (size_t)size))
+	{
+		free(bytes);
+		return;
+	}
+	free(bytes);
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		if (mesh.peers[index].used && ((mesh.peers[index].heard && mesh.peers[index].last_seen) ||
+			mesh.peers[index].bans || mesh.peers[index].cooldown_until))
+			mesh.peers[index].known = 1;
+	}
+	mesh.dirty = 0;
+}
+
+static void prune_peers(void)
+{
+	unsigned now = unix_now();
+	int index;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+		int ban_active;
+		int saved;
 
 		if (!peer->used)
 			continue;
-		memset(row, 0, sizeof(row));
-		memcpy(row, peer->key, 32);
-		write32(row + 32, (unsigned)peer->address);
-		write16(row + 36, peer->port);
-		write16(row + 38, (unsigned short)peer->bans);
-		write32(row + 40, peer->cooldown_until);
-		write32(row + 44, peer->last_seen);
-		if (fwrite(row, 1, sizeof(row), file) != sizeof(row))
-			break;
+		ban_active = peer->cooldown_until && peer_in_cooldown(peer->cooldown_until, now);
+		if (!peer_list_expired(peer->last_seen, peer->noted, now, peer->answer_sent, ban_active,
+			peer->bans > 0, MESH_UNHEARD_SECONDS, MESH_STALE_SECONDS))
+			continue;
+		saved = peer->known || peer->heard || peer->last_seen || peer->bans || peer->cooldown_until;
+		memset(peer, 0, sizeof(*peer));
+		if (saved)
+			mesh.dirty = 1;
 	}
-	fclose(file);
-	mesh.dirty = 0;
 }
 
 static void strikes_path(char *path, int size)
@@ -516,51 +721,39 @@ static void load_strikes(void)
 static void save_strikes(void)
 {
 	char path[512];
-	FILE *file;
-	unsigned char header[8];
+	static unsigned char bytes[8 + MESH_STRIKES * 145];
 	int index;
 	int count = 0;
+	int size = 8;
 
 	if (!mesh.strikes_dirty)
 		return;
 	strikes_path(path, (int)sizeof(path));
-	file = fopen(path, "wb");
-	if (!file)
-		return;
 	for (index = 0; index < MESH_STRIKES; index++)
 	{
 		if (mesh.strikes[index].used)
 			count++;
 	}
-	memset(header, 0, sizeof(header));
-	memcpy(header, "OSTK", 4);
-	header[4] = 1;
-	write16(header + 5, (unsigned short)count);
-	if (fwrite(header, 1, 8, file) != 8)
-	{
-		fclose(file);
-		return;
-	}
+	memset(bytes, 0, 8);
+	memcpy(bytes, "OSTK", 4);
+	bytes[4] = 1;
+	write16(bytes + 5, (unsigned short)count);
 	for (index = 0; index < MESH_STRIKES; index++)
 	{
-		unsigned char row[145];
 		struct mesh_strike *strike = &mesh.strikes[index];
 
 		if (!strike->used)
 			continue;
-		memset(row, 0, sizeof(row));
-		memcpy(row, strike->voter, 32);
-		memcpy(row + 32, strike->target, 32);
-		memcpy(row + 64, strike->match, 16);
-		memcpy(row + 80, strike->signature, 64);
-		row[144] = (unsigned char)strike->used;
-		if (fwrite(row, 1, sizeof(row), file) != sizeof(row))
-		{
-			fclose(file);
-			return;
-		}
+		memset(bytes + size, 0, 145);
+		memcpy(bytes + size, strike->voter, 32);
+		memcpy(bytes + size + 32, strike->target, 32);
+		memcpy(bytes + size + 64, strike->match, 16);
+		memcpy(bytes + size + 80, strike->signature, 64);
+		bytes[size + 144] = (unsigned char)strike->used;
+		size += 145;
 	}
-	fclose(file);
+	if (!replace_file(path, bytes, (size_t)size))
+		return;
 	mesh.strikes_dirty = 0;
 }
 
@@ -731,12 +924,18 @@ static void load_identity(void)
 		(wrapped ? "sealed this key, signature missing" : "not used"));
 }
 
-static struct mesh_peer *peer_slot(const unsigned char *key, int create)
+static int book_played(const unsigned char *key);
+static int match_text_is(const char *text, const unsigned char id[16]);
+static int book_level(const unsigned char *key);
+static int invites_young(unsigned now);
+
+static struct mesh_peer *peer_slot_kind(const unsigned char *key, int create, int named_only)
 {
 	int index;
 	int free_slot = -1;
-	int oldest = 0;
+	int oldest = -1;
 	unsigned oldest_seen = 0xffffffffu;
+	unsigned now;
 
 	for (index = 0; index < MESH_PEERS_MAX; index++)
 	{
@@ -748,21 +947,54 @@ static struct mesh_peer *peer_slot(const unsigned char *key, int create)
 		}
 		if (same_key(mesh.peers[index].key, key))
 			return &mesh.peers[index];
-		if (mesh.peers[index].last_seen <= oldest_seen)
-		{
-			oldest_seen = mesh.peers[index].last_seen;
-			oldest = index;
-		}
 	}
 	if (!create)
 		return NULL;
+	/* A key named only in someone else's list can take an address this
+	client has not heard. A key this client heard can take the slot that
+	has been quiet the longest. A peer heard in the last 30 seconds stays.
+	An open invite stays. A ban that is still running stays. A ban record
+	stays unless this client heard the new key. */
+	now = unix_now();
 	if (free_slot < 0)
+	{
+		for (index = 0; index < MESH_PEERS_MAX; index++)
+		{
+			struct mesh_peer *peer = &mesh.peers[index];
+			int heard = peer->last_seen != 0;
+			int ban_record = peer->bans > 0;
+			int ban_active = peer->cooldown_until && peer_in_cooldown(peer->cooldown_until, now);
+			int recent = 0;
+
+			if (peer->last_seen && now >= peer->last_seen &&
+				now - peer->last_seen < (unsigned)MESH_REACH_SECONDS)
+				recent = 1;
+			if (!peer_list_replaceable(heard, peer->answer_sent, ban_active, ban_record, named_only,
+				recent))
+				continue;
+			if (oldest < 0 || peer->last_seen <= oldest_seen)
+			{
+				oldest_seen = peer->last_seen;
+				oldest = index;
+			}
+		}
+		if (oldest < 0)
+			return NULL;
 		free_slot = oldest;
+	}
+	if (mesh.peers[free_slot].used && (mesh.peers[free_slot].known || mesh.peers[free_slot].last_seen ||
+		mesh.peers[free_slot].bans || mesh.peers[free_slot].cooldown_until))
+		mesh.dirty = 1;
 	memset(&mesh.peers[free_slot], 0, sizeof(mesh.peers[free_slot]));
 	memcpy(mesh.peers[free_slot].key, key, 32);
 	mesh.peers[free_slot].used = 1;
-	mesh.dirty = 1;
+	mesh.peers[free_slot].noted = now ? now : 1;
 	return &mesh.peers[free_slot];
+}
+
+static struct mesh_peer *peer_slot(const unsigned char *key, int create)
+{
+	return peer_slot_kind(key, create, 0);
 }
 
 static void note_peer(const unsigned char *key, unsigned long address, unsigned short port, int direct)
@@ -770,31 +1002,42 @@ static void note_peer(const unsigned char *key, unsigned long address, unsigned 
 	struct mesh_peer *peer;
 	unsigned now = unix_now();
 	int fresh;
+	int moved;
 
 	if (!key || same_key(key, mesh.public_key))
 		return;
-	peer = peer_slot(key, 1);
+	peer = peer_slot_kind(key, 1, direct ? 0 : 1);
 	if (!peer)
 		return;
 	/* A list passed along by someone else can name a stale address. An address
 	this client heard itself stands for 30 seconds. After that, the list can
-	move a peer that has gone quiet. */
-	fresh = peer->heard && peer->last_seen && now - peer->last_seen < 30;
+	move a peer that has gone quiet. A hello from someone already on the list
+	does not jump the introduction queue. */
+	fresh = peer->heard && peer->last_seen && now - peer->last_seen < MESH_REACH_SECONDS;
+	moved = 0;
 	if (direct || !fresh)
 	{
 		if (address && peer->address != address)
 		{
 			peer->address = address;
 			mesh.dirty = 1;
+			moved = 1;
 		}
 		if (port && peer->port != port)
 		{
 			peer->port = port;
 			mesh.dirty = 1;
+			moved = 1;
 		}
 	}
 	if (!direct)
+	{
+		if (!peer->heard && peer->address && peer->port)
+			peer->greet = 1;
 		return;
+	}
+	if (!peer->heard || moved)
+		peer->greet = 1;
 	peer->heard = 1;
 	peer->last_seen = now;
 	mesh.dirty = 1;
@@ -837,6 +1080,30 @@ static struct mesh_candidate *candidate_slot(const unsigned char *key, int creat
 	return NULL;
 }
 
+/* Names built into every install. Each one is a MeshCE client that can be
+reached on UDP 38952. A reply is an ordinary hello and is saved with the
+other peers. The address is looked up again so a changed record is picked up. */
+static const char *const mesh_seed_names[] = {
+	"bitmoda.ddns.net"
+};
+
+enum
+{
+	MESH_SEED_COUNT = (int)(sizeof(mesh_seed_names) / sizeof(mesh_seed_names[0])),
+	MESH_SEED_REFRESH_MS = 300000,
+	MESH_SEED_RETRY_MS = 30000
+};
+
+struct mesh_seed
+{
+	unsigned long address;
+	unsigned resolved_at;
+	int failed;
+	int logged_failure;
+};
+
+static struct mesh_seed mesh_seeds[MESH_SEED_COUNT];
+
 static void send_to(const unsigned char *packet, int size, unsigned long address, unsigned short port)
 {
 	struct sockaddr_in to;
@@ -850,23 +1117,337 @@ static void send_to(const unsigned char *packet, int size, unsigned long address
 	posix_socket_sendto(mesh.socket, packet, size, 0, &to, (int)sizeof(to));
 }
 
+static int peer_reachable(const struct mesh_peer *peer, unsigned now)
+{
+	if (!peer->used || !peer->heard || !peer->address || !peer->port || !peer->last_seen)
+		return 0;
+	return now - peer->last_seen < MESH_REACH_SECONDS;
+}
+
+static int reachable_count(unsigned now)
+{
+	int index;
+	int count = 0;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		if (peer_reachable(&mesh.peers[index], now))
+			count++;
+	}
+	return count;
+}
+
+static int peer_is_seed(const struct mesh_peer *peer);
+
+static int addressed_count(void)
+{
+	int index;
+	int count = 0;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		/* The introducer is contacted on its own schedule. */
+		if (peer->used && peer->address && peer->port && !peer_is_seed(peer))
+			count++;
+	}
+	return count;
+}
+
+static int seed_endpoint(unsigned long address, unsigned short port)
+{
+	int index;
+
+	if (!address || !port)
+		return 0;
+	for (index = 0; index < MESH_SEED_COUNT; index++)
+	{
+		if (mesh_seeds[index].address == address && port == net16(MESH_PORT))
+			return 1;
+	}
+	return 0;
+}
+
+static int peer_is_seed(const struct mesh_peer *peer)
+{
+	if (!peer)
+		return 0;
+	return seed_endpoint(peer->address, peer->port);
+}
+
+static int target_has(int slot)
+{
+	int index;
+
+	for (index = 0; index < mesh.target_count; index++)
+	{
+		if (mesh.targets[index] == slot)
+			return 1;
+	}
+	return 0;
+}
+
+static int target_add(int slot)
+{
+	if (slot < 0 || slot >= MESH_PEERS_MAX || mesh.target_count >= MESH_FANOUT || target_has(slot))
+		return 0;
+	mesh.targets[mesh.target_count++] = slot;
+	return 1;
+}
+
+/* On an announcement, peers who just made contact go out first. The
+cursor walks that queue so a later arrival is not stuck behind an early
+slot. Then peers heard in the last 30 seconds, then the next slice of the
+directory. The slice cursor walks the whole list, so a quiet address is
+tried again. A search packet does not spend its slice on introductions.
+Those wait for the next hello, which carries the peer list. */
+static void build_targets(unsigned now, int include_greets)
+{
+	int index;
+	int added;
+	int scanned;
+	int greets;
+	int start;
+
+	mesh.target_count = 0;
+	if (include_greets)
+	{
+		greets = 0;
+		scanned = 0;
+		start = mesh.greet_at;
+		if (start < 0 || start >= MESH_PEERS_MAX)
+			start = 0;
+		index = start;
+		while (scanned < MESH_PEERS_MAX && greets < MESH_FANOUT_GREET &&
+			mesh.target_count < MESH_FANOUT)
+		{
+			struct mesh_peer *peer = &mesh.peers[index];
+
+			if (peer->used && peer->greet && peer->address && peer->port &&
+				!peer_is_seed(peer) && target_add(index))
+				greets++;
+			index++;
+			if (index >= MESH_PEERS_MAX)
+				index = 0;
+			scanned++;
+		}
+		mesh.greet_at = index;
+	}
+	added = 0;
+	scanned = 0;
+	index = mesh.live_at;
+	if (index < 0 || index >= MESH_PEERS_MAX)
+		index = 0;
+	while (scanned < MESH_PEERS_MAX && added < MESH_FANOUT_LIVE && mesh.target_count < MESH_FANOUT)
+	{
+		if (peer_reachable(&mesh.peers[index], now) && !peer_is_seed(&mesh.peers[index]) &&
+			target_add(index))
+			added++;
+		index++;
+		if (index >= MESH_PEERS_MAX)
+			index = 0;
+		scanned++;
+	}
+	mesh.live_at = index;
+	scanned = 0;
+	index = mesh.sweep;
+	if (index < 0 || index >= MESH_PEERS_MAX)
+		index = 0;
+	while (scanned < MESH_PEERS_MAX && mesh.target_count < MESH_FANOUT)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (peer->used && peer->address && peer->port && !peer_is_seed(peer))
+			target_add(index);
+		index++;
+		if (index >= MESH_PEERS_MAX)
+			index = 0;
+		scanned++;
+	}
+	mesh.sweep = index;
+}
+
+static unsigned seed_gap_ms(void)
+{
+	if (reachable_count(unix_now()) < MESH_SEED_SPARSE)
+		return (unsigned)MESH_SEED_BUSY_MS;
+	return (unsigned)MESH_SEED_IDLE_MS;
+}
+
+static int seeds_due(unsigned now_ms)
+{
+	unsigned gap;
+
+	if (!now_ms)
+		now_ms = 1;
+	gap = seed_gap_ms();
+	if (!mesh.last_seed || now_ms - mesh.last_seed >= gap)
+	{
+		mesh.last_seed = now_ms;
+		mesh.seed_pair = now_ms;
+		return 1;
+	}
+	return mesh.seed_pair && now_ms - mesh.seed_pair < (unsigned)MESH_SEED_PAIR_MS;
+}
+
+/* A hello keeps its own clock. A find or an offer that just reached the
+introducer must not crowd this hello out, or the short list never follows. */
+static int seed_announce_due(unsigned now_ms)
+{
+	unsigned gap;
+
+	if (!now_ms)
+		now_ms = 1;
+	gap = seed_gap_ms();
+	if (mesh.last_seed_hello && now_ms - mesh.last_seed_hello < gap)
+		return 0;
+	mesh.last_seed_hello = now_ms;
+	mesh.last_seed = now_ms;
+	mesh.seed_pair = now_ms;
+	return 1;
+}
+
+static void send_seed_addresses(const unsigned char *packet, int size)
+{
+	int index;
+
+	for (index = 0; index < MESH_SEED_COUNT; index++)
+	{
+		if (!mesh_seeds[index].address)
+			continue;
+		send_to(packet, size, mesh_seeds[index].address, net16(MESH_PORT));
+	}
+}
+
 static void send_out(const unsigned char *packet, int size)
 {
 	unsigned long local;
 	unsigned long broadcast;
 	int index;
+	int addressed;
 
 	send_to(packet, size, 0xffffffffu, net16(MESH_PORT));
 	local = posix_local_ipv4_address();
 	broadcast = local ? (local | 0xff000000u) : 0;
 	if (broadcast && broadcast != local)
 		send_to(packet, size, broadcast, net16(MESH_PORT));
+	addressed = addressed_count();
+	/* The introducer has its own schedule on a short list and a long one.
+	   A saved introducer is not also part of the normal burst. */
+	if (mesh.announce && seed_announce_due(GetTickCount()))
+	{
+		send_seed_addresses(packet, size);
+		mesh.seed_sent = 1;
+	}
+	else if (seeds_due(GetTickCount()))
+	{
+		send_seed_addresses(packet, size);
+		mesh.seed_sent = 1;
+	}
+	/* A small list is the whole mesh this client can see. Contact every
+	saved address, including on a search. */
+	if (addressed <= MESH_FULL_SEND)
+	{
+		for (index = 0; index < MESH_PEERS_MAX; index++)
+		{
+			struct mesh_peer *peer = &mesh.peers[index];
+
+			if (!peer->used || !peer->address || !peer->port || peer_is_seed(peer))
+				continue;
+			send_to(packet, size, peer->address, peer->port);
+		}
+		mesh.used_targets = 0;
+		return;
+	}
+	if (!mesh.announce || !mesh.targets_ready)
+	{
+		build_targets(unix_now(), mesh.announce);
+		if (mesh.announce)
+			mesh.targets_ready = 1;
+	}
+	mesh.used_targets = 1;
+	for (index = 0; index < mesh.target_count; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[mesh.targets[index]];
+
+		if (!peer->used || !peer->address || !peer->port)
+			continue;
+		send_to(packet, size, peer->address, peer->port);
+	}
+}
+
+/* A packet that is sent once still has to reach the peers who are online
+now. The steady announcement stays on the shorter slice. */
+static void send_reachable(const unsigned char *packet, int size)
+{
+	unsigned long local;
+	unsigned long broadcast;
+	unsigned now;
+	int index;
+	int sent;
+	int start;
+
+	if (addressed_count() <= MESH_FULL_SEND)
+	{
+		send_out(packet, size);
+		return;
+	}
+	send_to(packet, size, 0xffffffffu, net16(MESH_PORT));
+	local = posix_local_ipv4_address();
+	broadcast = local ? (local | 0xff000000u) : 0;
+	if (broadcast && broadcast != local)
+		send_to(packet, size, broadcast, net16(MESH_PORT));
+	now = unix_now();
 	for (index = 0; index < MESH_PEERS_MAX; index++)
 	{
-		if (!mesh.peers[index].used || !mesh.peers[index].address || !mesh.peers[index].port)
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (!peer->used || !peer->answer_sent || !peer->address || !peer->port)
 			continue;
-		send_to(packet, size, mesh.peers[index].address, mesh.peers[index].port);
+		send_to(packet, size, peer->address, peer->port);
 	}
+	for (index = 0; index < MESH_CANDIDATES; index++)
+	{
+		struct mesh_candidate *candidate = &mesh.candidates[index];
+
+		if (!candidate->used || !candidate->address || !candidate->port)
+			continue;
+		send_to(packet, size, candidate->address, candidate->port);
+	}
+	if (reachable_count(now) <= MESH_REACH_SEND)
+	{
+		for (index = 0; index < MESH_PEERS_MAX; index++)
+		{
+			struct mesh_peer *peer = &mesh.peers[index];
+
+			if (!peer_reachable(peer, now))
+				continue;
+			send_to(packet, size, peer->address, peer->port);
+		}
+		return;
+	}
+	start = mesh.live_at;
+	if (start < 0 || start >= MESH_PEERS_MAX)
+		start = 0;
+	index = start;
+	sent = 0;
+	while (sent < MESH_REACH_SEND)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (peer_reachable(peer, now))
+		{
+			send_to(packet, size, peer->address, peer->port);
+			sent++;
+		}
+		index++;
+		if (index >= MESH_PEERS_MAX)
+			index = 0;
+		if (index == start)
+			break;
+	}
+	mesh.live_at = index;
 }
 
 static int packet_finish(unsigned char *packet, int payload)
@@ -878,12 +1459,11 @@ static int packet_finish(unsigned char *packet, int payload)
 	return size + 64;
 }
 
-static void send_hello(void)
+static int hello_packet(unsigned char *packet)
 {
-	unsigned char packet[MESH_MAX_PACKET];
 	int payload = MESH_HELLO_PAYLOAD;
 
-	memset(packet, 0, sizeof(packet));
+	memset(packet, 0, MESH_MAX_PACKET);
 	packet[0] = MESH_MAGIC0;
 	packet[1] = MESH_MAGIC1;
 	packet[2] = MESH_MAGIC2;
@@ -900,17 +1480,79 @@ static void send_hello(void)
 	packet[109] = (unsigned char)mesh.se_signature_len;
 	if (mesh.se_signature_len > 0 && mesh.se_signature_len <= 80)
 		memcpy(packet + 110, mesh.se_signature, (size_t)mesh.se_signature_len);
-	send_out(packet, packet_finish(packet, payload));
+	return packet_finish(packet, payload);
 }
 
-static void send_peers(void)
+static void send_hello(void)
 {
 	unsigned char packet[MESH_MAX_PACKET];
+	int size = hello_packet(packet);
+
+	if (size)
+		send_out(packet, size);
+}
+
+static void send_hello_to(unsigned long address, unsigned short port)
+{
+	unsigned char packet[MESH_MAX_PACKET];
+	int size = hello_packet(packet);
+
+	if (size)
+		send_to(packet, size, address, port);
+}
+
+/* Reservoir of at most 64. The shuffle stops at 64, and 8 names are drawn
+   from that sample. A longer reachable set stays an even draw. */
+static void sample_index(int *sample, int cap, int *count, int *seen, int index,
+	unsigned char *entropy, int entropy_len, int *used)
+{
+	unsigned span;
+	unsigned draw;
+
+	if (!sample || !count || !seen || cap < 1)
+		return;
+	if (*count < cap)
+	{
+		sample[*count] = index;
+		*count += 1;
+		*seen += 1;
+		return;
+	}
+	*seen += 1;
+	span = (unsigned)*seen;
+	if (!span || !entropy || entropy_len < 4)
+		return;
+	if (*used + 4 > entropy_len)
+	{
+		posix_random_bytes(entropy, (size_t)entropy_len);
+		*used = 0;
+	}
+	draw = (unsigned)entropy[*used] |
+		((unsigned)entropy[*used + 1] << 8) |
+		((unsigned)entropy[*used + 2] << 16) |
+		((unsigned)entropy[*used + 3] << 24);
+	*used += 4;
+	if (draw % span < (unsigned)cap)
+		sample[draw % cap] = index;
+}
+
+/* Up to MESH_GOSSIP peers this client has heard directly, in an order drawn
+   from the operating system's random bytes. */
+static int peers_packet(unsigned char *packet)
+{
+	int sample[64];
+	int order[64];
+	unsigned char entropy[512];
+	unsigned char sample_entropy[64];
+	int sample_count = 0;
+	int seen = 0;
+	int sample_used = 0;
 	int count = 0;
 	int index;
 	int payload;
+	unsigned now = unix_now();
 
-	memset(packet, 0, sizeof(packet));
+	memset(packet, 0, MESH_MAX_PACKET);
 	packet[0] = MESH_MAGIC0;
 	packet[1] = MESH_MAGIC1;
 	packet[2] = MESH_MAGIC2;
@@ -918,29 +1560,127 @@ static void send_peers(void)
 	packet[4] = MESH_VERSION;
 	packet[5] = MESH_PEERS;
 	memcpy(packet + 8, mesh.public_key, 32);
-	for (index = 0; index < MESH_PEERS_MAX && count < MESH_GOSSIP; index++)
+	posix_random_bytes(sample_entropy, sizeof(sample_entropy));
+	for (index = 0; index < MESH_PEERS_MAX; index++)
 	{
-		unsigned char *row;
-		struct mesh_peer *peer = &mesh.peers[index];
+		if (peer_reachable(&mesh.peers[index], now))
+			sample_index(sample, 64, &sample_count, &seen, index, sample_entropy,
+				(int)sizeof(sample_entropy), &sample_used);
+	}
+	posix_random_bytes(entropy, sizeof(entropy));
+	if (sample_count > 0 && !peer_search_shuffle(order, sample_count, entropy, (int)sizeof(entropy)))
+	{
+		for (index = 0; index < sample_count; index++)
+			order[index] = index;
+	}
+	if (sample_count > 0)
+	{
+		int share = sample_count < MESH_GOSSIP ? sample_count : MESH_GOSSIP;
 
-		if (!peer->used || !peer->address || !peer->port)
-			continue;
-		row = packet + 41 + count * 38;
-		memcpy(row, peer->key, 32);
-		write32(row + 32, (unsigned)peer->address);
-		write16(row + 36, peer->port);
-		count++;
+		for (index = 0; index < share; index++)
+		{
+			unsigned char *row = packet + 41 + count * 38;
+			struct mesh_peer *peer = &mesh.peers[sample[order[index]]];
+
+			memcpy(row, peer->key, 32);
+			write32(row + 32, (unsigned)peer->address);
+			write16(row + 36, peer->port);
+			count++;
+		}
 	}
 	packet[40] = (unsigned char)count;
 	payload = 33 + count * 38;
 	write16(packet + 6, (unsigned short)payload);
-	send_out(packet, packet_finish(packet, payload));
+	return packet_finish(packet, payload);
+}
+
+static int send_peers(void)
+{
+	unsigned char packet[MESH_MAX_PACKET];
+	int size = peers_packet(packet);
+
+	if (!size)
+		return 0;
+	send_out(packet, size);
+	return 1;
+}
+
+static void send_peers_to(unsigned long address, unsigned short port)
+{
+	unsigned char packet[MESH_MAX_PACKET];
+	int size = peers_packet(packet);
+
+	if (size)
+		send_to(packet, size, address, port);
+}
+
+/* The in-between hello does not carry the list to the directory. The
+introducer still learns it from the hello that reached it. */
+static void send_peers_to_seeds(void)
+{
+	unsigned char packet[MESH_MAX_PACKET];
+	int size = peers_packet(packet);
+
+	if (size)
+		send_seed_addresses(packet, size);
+}
+
+/* An address from a join. A peer heard directly in the last reach window
+   keeps the address that packet came from. */
+static void hint_peer(const unsigned char *key, unsigned long address, unsigned short port)
+{
+	struct mesh_peer *peer;
+	unsigned now = unix_now();
+	int fresh;
+
+	if (!key || same_key(key, mesh.public_key))
+		return;
+	peer = peer_slot(key, 1);
+	if (!peer)
+		return;
+	fresh = peer->heard && peer->last_seen && now - peer->last_seen < MESH_REACH_SECONDS;
+	if (fresh)
+		return;
+	if (address && peer->address != address)
+	{
+		peer->address = address;
+		if (peer->heard)
+			mesh.dirty = 1;
+	}
+	if (port && peer->port != port)
+	{
+		peer->port = port;
+		if (peer->heard)
+			mesh.dirty = 1;
+	}
+}
+
+static void introduce_locked(const unsigned char *key, unsigned long address, unsigned short port)
+{
+	struct mesh_peer *peer;
+	unsigned long dest_address = address;
+	unsigned short dest_port = port ? port : net16(MESH_PORT);
+
+	load_identity();
+	if (!mesh.have_key || !key || !address || same_key(key, mesh.public_key))
+		return;
+	hint_peer(key, address, dest_port);
+	peer = peer_slot(key, 0);
+	if (peer && peer->address && peer->port)
+	{
+		dest_address = peer->address;
+		dest_port = peer->port;
+	}
+	if (!mesh.ready)
+		return;
+	send_hello_to(dest_address, dest_port);
+	send_peers_to(dest_address, dest_port);
 }
 
 static int our_rank_steps(unsigned now)
 {
 	int elapsed = (int)((now - mesh.search_at) / 1000);
-	int steps = mesh_rank_steps(elapsed) + mesh.rank_extra;
+	int steps = mesh_rank_steps(elapsed);
 
 	/* 363 is the last step a 16-bit age can describe. Past that, this
 	client's window and the window it advertises would disagree. */
@@ -949,7 +1689,92 @@ static int our_rank_steps(unsigned now)
 	return steps;
 }
 
-/* The advertised age makes the other client open the same ranked window, including a step taken early because nobody else was in range. */
+static void ranked_seen_clear(void)
+{
+	int index;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+		mesh.peers[index].ranked_seen = 0;
+}
+
+static void ranked_seen_note(const unsigned char *key, unsigned now)
+{
+	struct mesh_peer *peer = peer_slot(key, 0);
+
+	if (!peer || peer->ranked_seen)
+		return;
+	peer->ranked_seen = now ? now : 1;
+}
+
+static int ranked_seen_steps(const unsigned char *key, unsigned now)
+{
+	struct mesh_peer *peer = peer_slot(key, 0);
+
+	if (!peer || !peer->ranked_seen || now < peer->ranked_seen)
+		return peer_ranked_steps(0);
+	return peer_ranked_steps((int)((now - peer->ranked_seen) / 1000u));
+}
+
+static int other_candidates(const unsigned char *key)
+{
+	int index;
+	int count = 0;
+
+	for (index = 0; index < MESH_CANDIDATES; index++)
+	{
+		if (!mesh.candidates[index].used)
+			continue;
+		if (key && same_key(mesh.candidates[index].key, key))
+			continue;
+		count++;
+	}
+	return count;
+}
+
+static int invites_waiting_except(const unsigned char *key)
+{
+	int index;
+	int count = 0;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		if (!mesh.peers[index].used || !mesh.peers[index].answer_sent)
+			continue;
+		if (key && same_key(mesh.peers[index].key, key))
+			continue;
+		if (candidate_slot(mesh.peers[index].key, 0))
+			continue;
+		count++;
+	}
+	return count;
+}
+
+static int invites_waiting(void)
+{
+	return invites_waiting_except(NULL);
+}
+
+static void clear_answers(void)
+{
+	int index;
+
+	mesh.drew = 0;
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		mesh.peers[index].answer_sent = 0;
+		mesh.peers[index].answer_at = 0;
+		mesh.peers[index].answer_tries = 0;
+		mesh.peers[index].echoed = 0;
+		mesh.peers[index].answer_address = 0;
+		mesh.peers[index].answer_port = 0;
+		mesh.peers[index].answer_seats = 0;
+		memset(mesh.peers[index].answer_nonce, 0, 16);
+		memset(mesh.peers[index].answer_name, 0, sizeof(mesh.peers[index].answer_name));
+	}
+}
+
+/* Still written on the announcement. A receiver does not open its window
+from it. It counts from the first time this search heard that client. */
 static unsigned our_rank_age_ms(unsigned now)
 {
 	int steps = our_rank_steps(now);
@@ -963,6 +1788,284 @@ static unsigned our_rank_age_ms(unsigned now)
 	if (seconds > 65535)
 		seconds = 65535;
 	return (unsigned)seconds * 1000u;
+}
+
+static int book_played(const unsigned char *key)
+{
+	int index;
+
+	if (!key)
+		return 0;
+	for (index = 0; index < MESH_STANDINGS; index++)
+	{
+		if (mesh.standings[index].used && same_key(mesh.standings[index].key, key))
+			return 1;
+	}
+	return 0;
+}
+
+static int looking_age_ms(unsigned at, unsigned now)
+{
+	unsigned gap;
+
+	if (!at || now < at)
+		return -1;
+	gap = now - at;
+	if (gap > 120000u)
+		return 120001;
+	return (int)gap;
+}
+
+static int ranked_open(const unsigned char *key, unsigned now)
+{
+	int steps;
+
+	if (strcmp(mesh.playlist, "ranked") != 0)
+		return 1;
+	steps = ranked_seen_steps(key, now);
+	return mesh_ranked_together(mesh.account_level, steps, book_level(key), steps);
+}
+
+static int ranked_allows(const unsigned char *key, unsigned now)
+{
+	if (strcmp(mesh.playlist, "ranked") != 0)
+		return 1;
+	/* A looking broadcast starts the clock. A reply does not. */
+	ranked_seen_note(key, now);
+	return ranked_open(key, now);
+}
+
+static int candidate_count(void)
+{
+	int index;
+	int count = 0;
+
+	for (index = 0; index < MESH_CANDIDATES; index++)
+	{
+		if (mesh.candidates[index].used)
+			count++;
+	}
+	return count;
+}
+
+static int search_open(void)
+{
+	return mesh.searching && (mesh.phase == MESH_PHASE_GATHER || mesh.phase == MESH_PHASE_PING ||
+		mesh.phase == MESH_PHASE_SCORE || mesh.phase == MESH_PHASE_OFFER);
+}
+
+static void send_answer_to(unsigned long address, unsigned short port, int role, const unsigned char nonce[16])
+{
+	unsigned char packet[256];
+	int payload = 65;
+
+	if (!address || !port || !nonce)
+		return;
+	memset(packet, 0, sizeof(packet));
+	packet[0] = MESH_MAGIC0;
+	packet[1] = MESH_MAGIC1;
+	packet[2] = MESH_MAGIC2;
+	packet[3] = MESH_MAGIC3;
+	packet[4] = MESH_VERSION;
+	packet[5] = MESH_ANSWER;
+	write16(packet + 6, (unsigned short)payload);
+	memcpy(packet + 8, mesh.public_key, 32);
+	memcpy(packet + 40, mesh.playlist, 16);
+	memcpy(packet + 56, nonce, 16);
+	packet[72] = role ? 1 : 0;
+	send_to(packet, packet_finish(packet, payload), address, port);
+}
+
+static int nonce_blank(const unsigned char nonce[16])
+{
+	int index;
+
+	if (!nonce)
+		return 1;
+	for (index = 0; index < 16; index++)
+	{
+		if (nonce[index])
+			return 0;
+	}
+	return 1;
+}
+
+static int endpoint_taken(unsigned long address, unsigned short port, const unsigned char *except)
+{
+	int index;
+
+	if (!address || !port)
+		return 1;
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (!peer->used || !peer->answer_sent || (except && same_key(peer->key, except)))
+			continue;
+		if (peer->answer_address == address && peer->answer_port == port)
+			return 1;
+	}
+	for (index = 0; index < MESH_CANDIDATES; index++)
+	{
+		struct mesh_candidate *candidate = &mesh.candidates[index];
+
+		if (!candidate->used || (except && same_key(candidate->key, except)))
+			continue;
+		if (candidate->address == address && candidate->port == port)
+			return 1;
+	}
+	return 0;
+}
+
+static int send_looking_answer(struct mesh_peer *peer)
+{
+	if (!peer || peer->answer_sent || candidate_count() + invites_waiting() >= MESH_CANDIDATES)
+		return 0;
+	if (!peer->looking_address || !peer->looking_port)
+		return 0;
+	/* One socket fills one seat. Extra keys from that socket do not. */
+	if (endpoint_taken(peer->looking_address, peer->looking_port, peer->key))
+		return 0;
+	if (!peer_include_in_search((int)peer->bans, peer->cooldown_until, unix_now(), clean_count(),
+		(int)(GetTickCount() - mesh.search_at)))
+		return 0;
+	posix_random_bytes(peer->answer_nonce, 16);
+	if (nonce_blank(peer->answer_nonce))
+		return 0;
+	peer->answer_address = peer->looking_address;
+	peer->answer_port = peer->looking_port;
+	peer->answer_seats = peer->looking_seats > 0 && peer->looking_seats <= 4 ? peer->looking_seats : 1;
+	memset(peer->answer_name, 0, sizeof(peer->answer_name));
+	memcpy(peer->answer_name, peer->looking_name, 11);
+	peer->answer_at = GetTickCount();
+	if (!peer->answer_at)
+		peer->answer_at = 1;
+	peer->answer_tries = 1;
+	peer->answer_sent = 1;
+	send_answer_to(peer->answer_address, peer->answer_port, 0, peer->answer_nonce);
+	return 1;
+}
+
+static int peer_is_new(const struct mesh_peer *peer)
+{
+	return peer && !peer->known && !book_played(peer->key);
+}
+
+static void answer_if_room(struct mesh_peer *peer, unsigned now)
+{
+	int age;
+	int room;
+
+	if (!mesh.drew || !search_open() || !peer || peer->answer_sent)
+		return;
+	if (memcmp(peer->looking_playlist, mesh.playlist, 16) != 0)
+		return;
+	age = looking_age_ms(peer->looking_at, now);
+	room = candidate_count() + invites_waiting() < MESH_CANDIDATES;
+	/* The draw already picked the peers who were looking. A later broadcast
+	fills a seat that is still open, including a known peer. */
+	if (!peer_search_fill(peer_is_new(peer), age, room) || !ranked_allows(peer->key, now))
+		return;
+	send_looking_answer(peer);
+}
+
+static void draw_search(unsigned now)
+{
+	int fresh[64];
+	int known_ids[64];
+	int order[64];
+	unsigned char entropy[1024];
+	unsigned char sample_entropy[64];
+	int fresh_count = 0;
+	int known_count = 0;
+	int fresh_seen = 0;
+	int known_seen = 0;
+	int sample_used = 0;
+	int index;
+	int sent = 0;
+
+	if (mesh.drew)
+		return;
+	mesh.drew = 1;
+	posix_random_bytes(sample_entropy, sizeof(sample_entropy));
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+		int age;
+
+		if (!peer->used || memcmp(peer->looking_playlist, mesh.playlist, 16) != 0)
+			continue;
+		age = looking_age_ms(peer->looking_at, now);
+		if (!ranked_allows(peer->key, now))
+			continue;
+		if (peer_is_new(peer))
+		{
+			if (peer_search_new(0, age))
+				sample_index(fresh, 64, &fresh_count, &fresh_seen, index, sample_entropy,
+					(int)sizeof(sample_entropy), &sample_used);
+		}
+		else if (peer_search_known(age))
+			sample_index(known_ids, 64, &known_count, &known_seen, index, sample_entropy,
+				(int)sizeof(sample_entropy), &sample_used);
+	}
+	posix_random_bytes(entropy, sizeof(entropy));
+	if (fresh_count > 0 && !peer_search_shuffle(order, fresh_count, entropy, 512))
+	{
+		for (index = 0; index < fresh_count; index++)
+			order[index] = index;
+	}
+	if (fresh_count > 0)
+	{
+		for (index = 0; index < fresh_count && sent < MESH_CANDIDATES; index++)
+			sent += send_looking_answer(&mesh.peers[fresh[order[index]]]);
+	}
+	if (known_count > 0 && sent < MESH_CANDIDATES &&
+		!peer_search_shuffle(order, known_count, entropy + 512, 512))
+	{
+		for (index = 0; index < known_count; index++)
+			order[index] = index;
+	}
+	if (known_count > 0 && sent < MESH_CANDIDATES)
+	{
+		for (index = 0; index < known_count && sent < MESH_CANDIDATES; index++)
+			sent += send_looking_answer(&mesh.peers[known_ids[order[index]]]);
+	}
+}
+
+static void admit_candidate(struct mesh_peer *peer)
+{
+	struct mesh_candidate *candidate;
+	int bans;
+	unsigned until;
+
+	if (!peer || !search_open() || !peer->answer_address || !peer->answer_port)
+		return;
+	if (!mesh_gamertag_ok(peer->answer_name))
+		return;
+	if (endpoint_taken(peer->answer_address, peer->answer_port, peer->key))
+		return;
+	bans = (int)peer->bans;
+	until = peer->cooldown_until;
+	if (!peer_include_in_search(bans, until, unix_now(), clean_count(),
+		(int)(GetTickCount() - mesh.search_at)))
+		return;
+	/* The first echo locks the address and the seats. A repeat does not move them. */
+	candidate = candidate_slot(peer->key, 0);
+	if (candidate)
+		return;
+	candidate = candidate_slot(peer->key, 1);
+	if (!candidate)
+		return;
+	candidate->address = peer->answer_address;
+	candidate->port = peer->answer_port;
+	candidate->bans = bans;
+	candidate->cooldown_until = until;
+	candidate->level = peer->looking_level_known ? peer->looking_level : book_level(peer->key);
+	candidate->seats = peer->answer_seats > 0 && peer->answer_seats <= 4 ? peer->answer_seats : 1;
+	memset(candidate->name, 0, sizeof(candidate->name));
+	memcpy(candidate->name, peer->answer_name, 11);
+	if (mesh.phase == MESH_PHASE_OFFER)
+		mesh.want_host_note = 1;
 }
 
 static void send_find(void)
@@ -1030,10 +2133,10 @@ static void send_score(void)
 	memcpy(packet + 8, mesh.public_key, 32);
 	write16(packet + 40, worst);
 	packet[42] = (unsigned char)answered;
-	send_out(packet, packet_finish(packet, payload));
+	send_reachable(packet, packet_finish(packet, payload));
 }
 
-static void send_offer(void)
+static void send_offer(int wide)
 {
 	unsigned char packet[512];
 	int invite_len;
@@ -1059,7 +2162,7 @@ static void send_offer(void)
 	memcpy(packet + 59, invite, (size_t)invite_len);
 	memset(packet + 219, 0, 32);
 	{
-		const char *map_name = mesh_map_for(mesh.match_id);
+		const char *map_name = mesh_map_for(mesh.match_id, mesh.playlist);
 
 		memcpy(packet + 219, map_name, strlen(map_name));
 	}
@@ -1072,7 +2175,27 @@ static void send_offer(void)
 		write16(packet + 6, (unsigned short)payload);
 	}
 	snprintf(mesh.invite, sizeof(mesh.invite), "%s", invite);
-	send_out(packet, packet_finish(packet, payload));
+	{
+		int sent = packet_finish(packet, payload);
+		int index;
+
+		if (sent <= 0)
+			return;
+		if (wide)
+		{
+			send_out(packet, sent);
+			return;
+		}
+		/* A late offer reaches the players already in this search. A new
+		search on another machine is not recruited into a match under way. */
+		for (index = 0; index < MESH_CANDIDATES; index++)
+		{
+			if (!mesh.candidates[index].used || !mesh.candidates[index].address ||
+				!mesh.candidates[index].port)
+				continue;
+			send_to(packet, sent, mesh.candidates[index].address, mesh.candidates[index].port);
+		}
+	}
 }
 
 static int strike_open(const unsigned char *target)
@@ -1139,11 +2262,11 @@ static int strike_add(const unsigned char *voter, const unsigned char *target, c
 
 			if (strike->used != 3)
 				continue;
-			/* Past eight waiting votes for one player in one match, a further
+			/* Past sixteen waiting votes for one player in one match, a further
 			one is not a real roster. A different match gives its slot up too. */
 			if (same_key(strike->target, target) && memcmp(strike->match, match, 16) == 0)
 			{
-				if (slot_kind > 3 && strike_waiting(target, match) > 8)
+				if (slot_kind > 3 && strike_waiting(target, match) > 16)
 				{
 					slot = index;
 					slot_kind = 3;
@@ -1167,6 +2290,78 @@ static int strike_add(const unsigned char *voter, const unsigned char *target, c
 	mesh.strikes[slot].used = 3;
 	mesh.strikes_dirty = 1;
 	return 1;
+}
+
+/* A leave is stored as a vote whose voter is the player who left. A packet
+cannot add one: strike_add refuses a voter who is the target. */
+static struct mesh_strike *strike_leave_find(const unsigned char *target, const unsigned char *match)
+{
+	int index;
+
+	if (!target || !match)
+		return NULL;
+	for (index = 0; index < MESH_STRIKES; index++)
+	{
+		struct mesh_strike *strike = &mesh.strikes[index];
+
+		if (!strike->used || !same_key(strike->voter, target) || !same_key(strike->target, target))
+			continue;
+		if (memcmp(strike->match, match, 16) != 0)
+			continue;
+		return strike;
+	}
+	return NULL;
+}
+
+static void strike_leave_put(const unsigned char *target, const unsigned char *match, int used)
+{
+	struct mesh_strike *strike;
+	int index;
+	int slot = -1;
+	int slot_kind = 99;
+
+	if (!target || !match || (used != 1 && used != 2))
+		return;
+	strike = strike_leave_find(target, match);
+	if (strike)
+	{
+		if (strike->used == 2 || strike->used == used)
+			return;
+		strike->used = used;
+		mesh.strikes_dirty = 1;
+		return;
+	}
+	for (index = 0; index < MESH_STRIKES; index++)
+	{
+		if (!mesh.strikes[index].used && slot_kind > 0)
+		{
+			slot = index;
+			slot_kind = 0;
+		}
+		else if (mesh.strikes[index].used == 2 && slot_kind > 2)
+		{
+			slot = index;
+			slot_kind = 2;
+		}
+	}
+	if (slot < 0)
+		return;
+	memset(&mesh.strikes[slot], 0, sizeof(mesh.strikes[slot]));
+	memcpy(mesh.strikes[slot].voter, target, 32);
+	memcpy(mesh.strikes[slot].target, target, 32);
+	memcpy(mesh.strikes[slot].match, match, 16);
+	mesh.strikes[slot].used = used;
+	mesh.strikes_dirty = 1;
+}
+
+static void strike_leave_drop_open(const unsigned char *target, const unsigned char *match)
+{
+	struct mesh_strike *strike = strike_leave_find(target, match);
+
+	if (!strike || strike->used != 1)
+		return;
+	strike->used = 0;
+	mesh.strikes_dirty = 1;
 }
 
 static void strike_consume_match(const unsigned char *target, const unsigned char *match)
@@ -1320,48 +2515,226 @@ static void load_standings(void)
 static void save_standings(void)
 {
 	char path[512];
-	FILE *file;
-	unsigned char header[8];
+	unsigned char bytes[8 + MESH_STANDINGS * 64];
 	int index;
 	int count = 0;
+	int size = 8;
 
 	standings_path(path, (int)sizeof(path));
-	file = fopen(path, "wb");
-	if (!file)
-		return;
 	for (index = 0; index < MESH_STANDINGS; index++)
 	{
 		if (mesh.standings[index].used)
 			count++;
 	}
-	memset(header, 0, sizeof(header));
-	memcpy(header, "ORNK", 4);
-	header[4] = 1;
-	header[5] = (unsigned char)count;
-	header[6] = (unsigned char)(count >> 8);
-	if (fwrite(header, 1, 8, file) != 8)
-	{
-		fclose(file);
-		return;
-	}
+	memset(bytes, 0, 8);
+	memcpy(bytes, "ORNK", 4);
+	bytes[4] = 1;
+	bytes[5] = (unsigned char)count;
+	bytes[6] = (unsigned char)(count >> 8);
 	for (index = 0; index < MESH_STANDINGS; index++)
 	{
-		unsigned char row[64];
 		struct mesh_standing *standing = &mesh.standings[index];
 
 		if (!standing->used)
 			continue;
-		memset(row, 0, sizeof(row));
-		memcpy(row, standing->key, 32);
-		memcpy(row + 32, standing->name, 11);
-		write32(row + 44, (unsigned)(standing->games < 0 ? 0 : standing->games));
-		write32(row + 48, (unsigned)(standing->level < 0 ? 0 : standing->level));
-		write32(row + 52, (unsigned)(standing->wins < 0 ? 0 : standing->wins));
-		write32(row + 56, (unsigned)(standing->losses < 0 ? 0 : standing->losses));
-		if (fwrite(row, 1, sizeof(row), file) != sizeof(row))
+		memset(bytes + size, 0, 64);
+		memcpy(bytes + size, standing->key, 32);
+		memcpy(bytes + size + 32, standing->name, 11);
+		write32(bytes + size + 44, (unsigned)(standing->games < 0 ? 0 : standing->games));
+		write32(bytes + size + 48, (unsigned)(standing->level < 0 ? 0 : standing->level));
+		write32(bytes + size + 52, (unsigned)(standing->wins < 0 ? 0 : standing->wins));
+		write32(bytes + size + 56, (unsigned)(standing->losses < 0 ? 0 : standing->losses));
+		size += 64;
+	}
+	replace_file(path, bytes, (size_t)size);
+}
+
+/* Match ids whose tally was already added to the standings. The poll that
+applied them is only in memory, so a replay after it is gone must not add
+the same games again. A fuller roster in the same session forgets the id
+before it applies the replacement. Older ids stay. Dropping one to store a
+newer id would let that older tally change rank again. */
+enum { APPLIED_LIMIT = 65535 };
+
+struct applied_match
+{
+	char id[48];
+	int keys;
+};
+
+static struct applied_match *applied_matches;
+static int applied_count;
+static int applied_cap;
+
+static void applied_path(char *path, int size)
+{
+	snprintf(path, (size_t)size, "%s/applied.dat", platform_save_root());
+}
+
+static int applied_grow(int need)
+{
+	int cap;
+	struct applied_match *next;
+
+	if (need <= applied_cap)
+		return 1;
+	cap = applied_cap > 0 ? applied_cap : 64;
+	while (cap < need)
+	{
+		if (cap > APPLIED_LIMIT / 2)
+		{
+			cap = APPLIED_LIMIT;
 			break;
+		}
+		cap *= 2;
+	}
+	if (cap < need || cap > APPLIED_LIMIT)
+		return 0;
+	next = realloc(applied_matches, (size_t)cap * sizeof(*applied_matches));
+	if (!next)
+		return 0;
+	applied_matches = next;
+	applied_cap = cap;
+	return 1;
+}
+
+static void load_applied(void)
+{
+	char path[512];
+	FILE *file;
+	unsigned char header[8];
+	unsigned count;
+	unsigned index;
+
+	applied_count = 0;
+	applied_path(path, (int)sizeof(path));
+	file = fopen(path, "rb");
+	if (!file)
+		return;
+	if (fread(header, 1, 8, file) != 8 || memcmp(header, "OAPL", 4) != 0 || header[4] != 1)
+	{
+		fclose(file);
+		return;
+	}
+	count = (unsigned)header[5] | ((unsigned)header[6] << 8);
+	if (count > APPLIED_LIMIT)
+		count = APPLIED_LIMIT;
+	for (index = 0; index < count; index++)
+	{
+		unsigned char row[52];
+		struct applied_match *slot;
+
+		if (fread(row, 1, sizeof(row), file) != sizeof(row))
+			break;
+		if (!row[0])
+			continue;
+		if (!applied_grow(applied_count + 1))
+			break;
+		slot = &applied_matches[applied_count++];
+		memset(slot, 0, sizeof(*slot));
+		memcpy(slot->id, row, 47);
+		slot->id[47] = 0;
+		slot->keys = (int)read32(row + 48);
 	}
 	fclose(file);
+}
+
+static void save_applied(void)
+{
+	char path[512];
+	unsigned char *bytes;
+	int index;
+	int count = 0;
+	int size = 8;
+
+	applied_path(path, (int)sizeof(path));
+	for (index = 0; index < applied_count; index++)
+	{
+		if (applied_matches[index].id[0])
+			count++;
+	}
+	if (count > APPLIED_LIMIT)
+		count = APPLIED_LIMIT;
+	bytes = malloc((size_t)(8 + count * 52));
+	if (!bytes)
+		return;
+	memset(bytes, 0, 8);
+	memcpy(bytes, "OAPL", 4);
+	bytes[4] = 1;
+	bytes[5] = (unsigned char)count;
+	bytes[6] = (unsigned char)(count >> 8);
+	for (index = 0; index < applied_count && size < 8 + count * 52; index++)
+	{
+		if (!applied_matches[index].id[0])
+			continue;
+		memset(bytes + size, 0, 52);
+		memcpy(bytes + size, applied_matches[index].id, 47);
+		write32(bytes + size + 48, (unsigned)(applied_matches[index].keys < 0 ? 0 :
+			applied_matches[index].keys));
+		size += 52;
+	}
+	replace_file(path, bytes, (size_t)size);
+	free(bytes);
+}
+
+static int applied_known(const char *id, int *keys)
+{
+	int index;
+
+	if (keys)
+		*keys = 0;
+	if (!id || !id[0])
+		return 0;
+	for (index = 0; index < applied_count; index++)
+	{
+		if (!applied_matches[index].id[0] || strcmp(applied_matches[index].id, id) != 0)
+			continue;
+		if (keys)
+			*keys = applied_matches[index].keys;
+		return 1;
+	}
+	return 0;
+}
+
+static void applied_remember(const char *id, int keys)
+{
+	int index;
+
+	if (!id || !id[0])
+		return;
+	for (index = 0; index < applied_count; index++)
+	{
+		if (!applied_matches[index].id[0] || strcmp(applied_matches[index].id, id) != 0)
+			continue;
+		applied_matches[index].keys = keys;
+		save_applied();
+		return;
+	}
+	if (applied_count >= APPLIED_LIMIT || !applied_grow(applied_count + 1))
+		return;
+	memset(&applied_matches[applied_count], 0, sizeof(applied_matches[applied_count]));
+	snprintf(applied_matches[applied_count].id, sizeof(applied_matches[applied_count].id), "%s", id);
+	applied_matches[applied_count].keys = keys;
+	applied_count++;
+	save_applied();
+}
+
+static void applied_forget(const char *id)
+{
+	int index;
+
+	if (!id || !id[0])
+		return;
+	for (index = 0; index < applied_count; index++)
+	{
+		if (!applied_matches[index].id[0] || strcmp(applied_matches[index].id, id) != 0)
+			continue;
+		memmove(&applied_matches[index], &applied_matches[index + 1],
+			(size_t)(applied_count - index - 1) * sizeof(*applied_matches));
+		applied_count--;
+		save_applied();
+		return;
+	}
 }
 
 static int book_level(const unsigned char *key)
@@ -1480,6 +2853,10 @@ static int tally_blocked(struct mesh_poll *poll, const char *text)
 		for (other = 0; other < MESH_VOTES; other++)
 		{
 			if (!poll->votes[other].used)
+				continue;
+			/* The fuller tally has to come from someone on this roster.
+			The stranger's own padded ballot does not hold the match. */
+			if (!mesh_tally_has_key(text, poll->votes[other].key))
 				continue;
 			if (mesh_tally_key_count(poll->votes[other].text) < listed)
 				continue;
@@ -1619,6 +2996,7 @@ static void tally_decide(struct mesh_poll *poll)
 	int best_keys = 0;
 	int index;
 	int tie = 0;
+	int newly = 0;
 	unsigned now;
 	unsigned char match_bytes[16];
 
@@ -1664,11 +3042,26 @@ static void tally_decide(struct mesh_poll *poll)
 	}
 	if (!best || tie)
 		return;
+	{
+		int stored_keys = 0;
+
+		/* This match was already added. The poll that remembered it is gone,
+		so the same signed tally must not move the standings again. */
+		if (poll->applied_keys == 0 && !poll->committed &&
+			applied_known(poll->match_id, &stored_keys))
+		{
+			snprintf(poll->decided, sizeof(poll->decided), "%s", best);
+			poll->committed = 1;
+			poll->applied_keys = stored_keys > 0 ? stored_keys : best_keys;
+			return;
+		}
+	}
 	/* A shorter tally can be kept before the rest arrive. The fuller one
 	takes that rank change back. */
 	if (poll->applied_keys > 0 && best_keys > poll->applied_keys)
 	{
 		standing_undo_match(poll->match_id);
+		applied_forget(poll->match_id);
 		poll->applied_count = 0;
 		poll->applied_keys = 0;
 		poll->committed = 0;
@@ -1718,11 +3111,14 @@ static void tally_decide(struct mesh_poll *poll)
 		standing_snap(poll->votes[index].key, poll->match_id, was_new, games, level, wins, losses);
 		memcpy(poll->applied[poll->applied_count], poll->votes[index].key, 32);
 		poll->applied_count++;
+		newly = 1;
 		save_standings();
 		if (same_key(poll->votes[index].key, mesh.public_key))
 			note_sync_ours();
 	}
 	poll->applied_keys = best_keys;
+	if (newly)
+		applied_remember(poll->match_id, best_keys);
 	if (tally_match_bytes(poll->decided, match_bytes))
 		report_settle_match(match_bytes);
 }
@@ -1774,10 +3170,12 @@ static void tally_store(const unsigned char *key, const char *match_id, const ch
 	if (name)
 		snprintf(vote->name, sizeof(vote->name), "%s", name);
 	snprintf(vote->text, sizeof(vote->text), "%s", text);
-	if (raw && raw_size > 0 && raw_size <= (int)sizeof(vote->raw))
+	vote->raw_count = 0;
+	if (raw && raw_size > 0 && raw_size <= MESH_MAX_PACKET)
 	{
-		memcpy(vote->raw, raw, (size_t)raw_size);
-		vote->raw_size = raw_size;
+		memcpy(vote->raw[0], raw, (size_t)raw_size);
+		vote->raw_size[0] = raw_size;
+		vote->raw_count = 1;
 	}
 	vote->used = 1;
 	poll->relays = 8;
@@ -1800,12 +3198,174 @@ static void relay_tallies(void)
 			continue;
 		for (vote_index = 0; vote_index < MESH_VOTES; vote_index++)
 		{
-			if (!poll->votes[vote_index].used || poll->votes[vote_index].raw_size <= 0)
+			int part;
+
+			if (!poll->votes[vote_index].used)
 				continue;
-			send_out(poll->votes[vote_index].raw, poll->votes[vote_index].raw_size);
+			for (part = 0; part < poll->votes[vote_index].raw_count && part < MESH_TALLY_PARTS; part++)
+			{
+				if (poll->votes[vote_index].raw_size[part] <= 0)
+					continue;
+				send_reachable(poll->votes[vote_index].raw[part], poll->votes[vote_index].raw_size[part]);
+			}
 		}
 		poll->relays--;
 	}
+}
+
+struct mesh_tally_gather
+{
+	int used;
+	unsigned char key[32];
+	char match_id[40];
+	char name[12];
+	int total;
+	int count;
+	unsigned got;
+	char text[MESH_TALLY_TEXT];
+	unsigned char raw[MESH_TALLY_PARTS][MESH_MAX_PACKET];
+	int raw_size[MESH_TALLY_PARTS];
+};
+
+static struct mesh_tally_gather tally_gather[MESH_TALLY_GATHER];
+
+/* The signed packets travel with the scoreboard so a later client can pass
+on the same signatures. */
+static void tally_attach_raws(const unsigned char *key, const char *match_id, const char *text,
+	const unsigned char packets[][MESH_MAX_PACKET], const int *sizes, int count)
+{
+	struct mesh_poll *poll;
+	int index;
+	int part;
+
+	if (!key || !match_id || !text || !packets || !sizes || count < 1)
+		return;
+	poll = poll_for(match_id, 0);
+	if (!poll)
+		return;
+	for (index = 0; index < MESH_VOTES; index++)
+	{
+		struct mesh_vote *vote = &poll->votes[index];
+
+		if (!vote->used || !same_key(vote->key, key) || strcmp(vote->text, text) != 0)
+			continue;
+		vote->raw_count = 0;
+		for (part = 0; part < count && part < MESH_TALLY_PARTS; part++)
+		{
+			if (sizes[part] <= 0 || sizes[part] > MESH_MAX_PACKET)
+				continue;
+			memcpy(vote->raw[part], packets[part], (size_t)sizes[part]);
+			vote->raw_size[part] = sizes[part];
+			vote->raw_count = part + 1;
+		}
+		return;
+	}
+}
+
+/* A scoreboard that does not fit in one packet arrives in order-numbered
+pieces. The text is the same one every client signs. */
+static void tally_take_part(const unsigned char *key, const unsigned char *packet, int size,
+	const unsigned char *body, int payload)
+{
+	struct mesh_tally_gather *slot = NULL;
+	char match_id[40];
+	char name[12];
+	int total;
+	int part_index;
+	int part_count;
+	int part_len;
+	int offset;
+	int index;
+	int free_slot = -1;
+	unsigned mask;
+
+	if (!key || !packet || !body || payload < 90)
+		return;
+	total = (int)read16(body + 84);
+	part_index = body[86];
+	part_count = body[87];
+	part_len = (int)read16(body + 88);
+	if (part_count < 2 || part_count > MESH_TALLY_PARTS || part_index >= part_count)
+		return;
+	if (total < 1 || total >= MESH_TALLY_TEXT)
+		return;
+	if (part_index < part_count - 1)
+	{
+		if (part_len != MESH_TALLY_CHUNK)
+			return;
+	}
+	else if (part_len <= 0 || part_len > MESH_TALLY_CHUNK ||
+		part_len != total - (part_count - 1) * MESH_TALLY_CHUNK)
+		return;
+	offset = part_index * MESH_TALLY_CHUNK;
+	if (offset < 0 || offset + part_len > total || offset + part_len >= MESH_TALLY_TEXT)
+		return;
+	if (payload < 90 + part_len || size < 8 + payload + 64 || size > MESH_MAX_PACKET)
+		return;
+	memset(match_id, 0, sizeof(match_id));
+	memcpy(match_id, body + 32, 39);
+	if (!match_id[0])
+		return;
+	memset(name, 0, sizeof(name));
+	memcpy(name, body + 72, 11);
+	for (index = 0; index < MESH_TALLY_GATHER; index++)
+	{
+		if (!tally_gather[index].used)
+		{
+			if (free_slot < 0)
+				free_slot = index;
+			continue;
+		}
+		if (same_key(tally_gather[index].key, key) && !strcmp(tally_gather[index].match_id, match_id))
+		{
+			slot = &tally_gather[index];
+			break;
+		}
+	}
+	if (!slot)
+	{
+		if (free_slot < 0)
+			free_slot = 0;
+		slot = &tally_gather[free_slot];
+		memset(slot, 0, sizeof(*slot));
+		slot->used = 1;
+		memcpy(slot->key, key, 32);
+		snprintf(slot->match_id, sizeof(slot->match_id), "%s", match_id);
+		slot->total = total;
+		slot->count = part_count;
+	}
+	if (slot->total != total || slot->count != part_count)
+	{
+		unsigned char kept[32];
+
+		memcpy(kept, slot->key, 32);
+		memset(slot, 0, sizeof(*slot));
+		slot->used = 1;
+		memcpy(slot->key, kept, 32);
+		snprintf(slot->match_id, sizeof(slot->match_id), "%s", match_id);
+		slot->total = total;
+		slot->count = part_count;
+	}
+	if (name[0] && !slot->name[0])
+		snprintf(slot->name, sizeof(slot->name), "%s", name);
+	if ((slot->got & (1u << part_index)) &&
+		memcmp(slot->text + offset, body + 90, (size_t)part_len) != 0)
+	{
+		/* This install sent a different scoreboard. Keep the latest piece. */
+		slot->got = 0;
+		memset(slot->text, 0, (size_t)total);
+	}
+	memcpy(slot->text + offset, body + 90, (size_t)part_len);
+	slot->got |= 1u << part_index;
+	memcpy(slot->raw[part_index], packet, (size_t)size);
+	slot->raw_size[part_index] = size;
+	mask = (1u << part_count) - 1u;
+	if ((slot->got & mask) != mask)
+		return;
+	slot->text[total] = 0;
+	tally_store(key, slot->match_id, slot->name, slot->text, slot->raw[0], slot->raw_size[0]);
+	tally_attach_raws(key, slot->match_id, slot->text, slot->raw, slot->raw_size, part_count);
+	slot->used = 0;
 }
 
 static void tally_review(void)
@@ -1825,7 +3385,7 @@ static int report_message(unsigned char *message, const unsigned char *target, c
 	const unsigned char *host)
 {
 	memset(message, 0, 96);
-	memcpy(message, "OpenCE report v1", 16);
+	memcpy(message, "MeshCE report v1", 16);
 	if (target)
 		memcpy(message + 16, target, 32);
 	if (match)
@@ -1871,19 +3431,30 @@ static struct mesh_poll *committed_poll(const unsigned char match[16])
 	return NULL;
 }
 
-/* A vote counts only after the tally is kept, and only from an install that
-signed that tally. The player count in the packet is not used. */
+/* A vote counts after the tally is kept, and only from an install that
+signed that tally. The first player who left counts as one vote against
+that install. A player who leaves later does not. Votes already signed
+against that later player still count, because the tally shows they
+played. The player count in a report packet is not used. */
 static void report_settle(const unsigned char *target, const unsigned char *match)
 {
 	struct mesh_poll *poll;
 	int listed;
 	int good = 0;
+	int left;
+	int quit;
 	int index;
 
 	if (!target || !match)
 		return;
 	poll = committed_poll(match);
-	if (!poll || !tally_signed(poll, target))
+	if (!poll)
+		return;
+	left = mesh_tally_key_left(poll->decided, target);
+	quit = mesh_tally_key_quit(poll->decided, target);
+	if (!quit)
+		strike_leave_drop_open(target, match);
+	if (!tally_signed(poll, target) && !left)
 		return;
 	listed = mesh_tally_key_count(poll->decided);
 	for (index = 0; index < MESH_STRIKES; index++)
@@ -1893,10 +3464,14 @@ static void report_settle(const unsigned char *target, const unsigned char *matc
 		if ((strike->used != 1 && strike->used != 3) || !same_key(strike->target, target) ||
 			memcmp(strike->match, match, 16) != 0)
 			continue;
+		if (same_key(strike->voter, target))
+			continue;
 		if (!tally_signed(poll, strike->voter))
 			continue;
 		good++;
 	}
+	if (quit)
+		good++;
 	if (peer_report_accepted(good, listed))
 	{
 		if (!already_applied(target, match))
@@ -1911,11 +3486,13 @@ static void report_settle(const unsigned char *target, const unsigned char *matc
 			if ((strike->used != 1 && strike->used != 3) || !same_key(strike->target, target) ||
 				memcmp(strike->match, match, 16) != 0)
 				continue;
-			if (!tally_signed(poll, strike->voter))
+			if (same_key(strike->voter, target) || !tally_signed(poll, strike->voter))
 				continue;
 			strike->used = 2;
 			mesh.strikes_dirty = 1;
 		}
+		if (quit)
+			strike_leave_put(target, match, 2);
 		if (mesh.dirty)
 			save_peers();
 		if (mesh.strikes_dirty)
@@ -1928,11 +3505,13 @@ static void report_settle(const unsigned char *target, const unsigned char *matc
 
 		if (strike->used != 3 || !same_key(strike->target, target) || memcmp(strike->match, match, 16) != 0)
 			continue;
-		if (!tally_signed(poll, strike->voter))
+		if (same_key(strike->voter, target) || !tally_signed(poll, strike->voter))
 			continue;
 		strike->used = 1;
 		mesh.strikes_dirty = 1;
 	}
+	if (quit)
+		strike_leave_put(target, match, 1);
 	while (peer_strikes_ban(strike_open(target)))
 		strike_apply(target);
 	if (mesh.dirty)
@@ -1943,7 +3522,8 @@ static void report_settle(const unsigned char *target, const unsigned char *matc
 
 static void report_settle_match(const unsigned char match[16])
 {
-	unsigned char seen[16][32];
+	unsigned char seen[32][32];
+	struct mesh_poll *poll;
 	int seen_count = 0;
 	int index;
 
@@ -1963,10 +3543,35 @@ static void report_settle_match(const unsigned char match[16])
 			if (same_key(seen[earlier], mesh.strikes[index].target))
 				copy = 0;
 		}
-		if (!copy || seen_count >= 16)
+		if (!copy || seen_count >= 32)
 			continue;
 		memcpy(seen[seen_count], mesh.strikes[index].target, 32);
 		seen_count++;
+	}
+	/* A leave with no other vote is still a vote. The scoreboard names the install. */
+	poll = committed_poll(match);
+	if (poll)
+	{
+		int keys = mesh_tally_key_count(poll->decided);
+
+		for (index = 0; index < keys; index++)
+		{
+			unsigned char key[32];
+			int earlier;
+			int copy = 1;
+
+			if (!mesh_tally_key_at(poll->decided, index, key) || !mesh_tally_key_quit(poll->decided, key))
+				continue;
+			for (earlier = 0; earlier < seen_count; earlier++)
+			{
+				if (same_key(seen[earlier], key))
+					copy = 0;
+			}
+			if (!copy || seen_count >= 32)
+				continue;
+			memcpy(seen[seen_count], key, 32);
+			seen_count++;
+		}
 	}
 	for (index = 0; index < seen_count; index++)
 		report_settle(seen[index], match);
@@ -2132,49 +3737,71 @@ static void handle_packet(const unsigned char *packet, int size, unsigned long a
 		break;
 	}
 	case MESH_FIND:
-		if (!mesh.searching || payload < 69 || memcmp(body + 32, mesh.playlist, 16) != 0)
+		if (payload < 69)
 			break;
 		if (read16(body + 48) != HALO_PORT_NETWORK_VERSION)
 			break;
-		if (mesh.phase != MESH_PHASE_GATHER && mesh.phase != MESH_PHASE_PING && mesh.phase != MESH_PHASE_SCORE &&
-			mesh.phase != MESH_PHASE_OFFER && mesh.phase != MESH_PHASE_JOIN)
-			break;
-		if (!strcmp(mesh.playlist, "ranked"))
 		{
-			int mine;
-			int theirs;
+			char announced[12];
+			struct mesh_peer *peer = peer_slot(key, 0);
+			unsigned now_ms = GetTickCount();
 
-			mine = our_rank_steps(GetTickCount());
-			theirs = mesh_rank_steps((int)(read32(body + 65) / 1000));
-			if (!mesh_ranked_together(mesh.account_level, mine, book_level(key), theirs))
+			memset(announced, 0, sizeof(announced));
+			memcpy(announced, body + 53, 11);
+			if (!mesh_gamertag_ok(announced) || !peer)
 				break;
+			/* Remember the looking broadcast even when this client is not
+			searching, so a search can see the last minute or two. */
+			peer->looking_at = now_ms ? now_ms : 1;
+			peer->looking_address = address;
+			peer->looking_port = port;
+			memcpy(peer->looking_playlist, body + 32, 16);
+			peer->looking_seats = body[52] > 0 && body[52] <= 4 ? body[52] : 1;
+			peer->looking_level = (int)read16(body + 50);
+			peer->looking_level_known = 1;
+			memset(peer->looking_name, 0, sizeof(peer->looking_name));
+			memcpy(peer->looking_name, announced, 11);
+			if (!mesh.searching || memcmp(peer->looking_playlist, mesh.playlist, 16) != 0)
+				break;
+			if (!ranked_allows(key, now_ms))
+				break;
+			answer_if_room(peer, now_ms);
 		}
+		break;
+	case MESH_ANSWER:
+		if (payload < 65 || !mesh.searching || memcmp(body + 32, mesh.playlist, 16) != 0)
+			break;
 		{
 			struct mesh_peer *peer = peer_slot(key, 0);
-			int bans = peer ? (int)peer->bans : 0;
-			unsigned until = peer ? peer->cooldown_until : 0;
-			struct mesh_candidate *candidate;
-			int fresh;
+			unsigned char nonce[16];
+			unsigned now_ms = GetTickCount();
 
-			if (!peer_include_in_search(bans, until, unix_now(), clean_count(),
-				(int)(GetTickCount() - mesh.search_at)))
+			if (!peer)
 				break;
-			candidate = candidate_slot(key, 0);
-			fresh = candidate == NULL;
-			if (fresh)
-				candidate = candidate_slot(key, 1);
-			if (!candidate)
+			memcpy(nonce, body + 48, 16);
+			/* The clock starts on a looking broadcast. This packet does not move it. */
+			if (!ranked_open(key, now_ms))
 				break;
-			candidate->address = address;
-			candidate->port = port;
-			candidate->bans = bans;
-			candidate->cooldown_until = until;
-			candidate->level = book_level(key);
-			candidate->seats = body[52] > 0 && body[52] <= 4 ? body[52] : 1;
-			memset(candidate->name, 0, sizeof(candidate->name));
-			memcpy(candidate->name, body + 53, 11);
-			if (fresh && mesh.phase == MESH_PHASE_OFFER)
-				mesh.want_host_note = 1;
+			if (body[64] == 0)
+			{
+				int others = candidate_count() > 0 || invites_waiting() > 0;
+
+				/* Echo during the measurement, so both searches see the same
+				players. Once this client is hosting, an echo would list it in
+				a lobby it is not going to join. */
+				if ((mesh.phase == MESH_PHASE_PING || mesh.phase == MESH_PHASE_SCORE ||
+					mesh.phase == MESH_PHASE_OFFER) &&
+					peer_lobby_echo(mesh.phase == MESH_PHASE_OFFER, peer->answer_sent, others) &&
+					peer_include_in_search((int)peer->bans, peer->cooldown_until, unix_now(),
+						clean_count(), (int)(GetTickCount() - mesh.search_at)))
+				{
+					send_answer_to(address, port, 1, nonce);
+					peer->echoed = 1;
+				}
+			}
+			else if (peer_answer_admits(body[64], peer->answer_sent,
+				memcmp(nonce, peer->answer_nonce, 16) == 0, nonce_blank(peer->answer_nonce)))
+				admit_candidate(peer);
 		}
 		break;
 	case MESH_PING:
@@ -2217,41 +3844,118 @@ static void handle_packet(const unsigned char *packet, int size, unsigned long a
 		if (!candidate || payload < 35)
 			break;
 		candidate->score_median = read16(body + 32);
-		candidate->score_answered = body[34];
+		/* The answered count in the packet is not how many clients they reached. */
+		candidate->score_answered = peer_score_answers(candidate->rtt_count);
 		candidate->score_have = 1;
 		break;
 	}
 	case MESH_OFFER:
+		{
+			struct mesh_peer *offer_peer = peer_slot(key, 0);
+
+			if (offer_peer && payload >= 261)
+			{
+				offer_peer->looking_level = (int)read16(body + 259);
+				offer_peer->looking_level_known = 1;
+			}
+		}
+		/* the first offer can name a private address, or none, when the public
+		one is not known yet. a later offer from that host replaces it. */
+		if (mesh.have_match && !mesh.we_host && same_key(key, mesh.winner) &&
+			(mesh.phase == MESH_PHASE_DONE || !mesh.searching))
+		{
+			int invite_len;
+			char next[160];
+			int next_reach;
+			int have_reach;
+
+			if (payload < 259 || memcmp(body + 32, mesh.playlist, 16) != 0)
+				break;
+			invite_len = body[50];
+			if (invite_len <= 0 || invite_len > 159)
+				break;
+			memcpy(next, body + 51, (size_t)invite_len);
+			next[invite_len] = 0;
+			next_reach = p2p_invite_reach(next);
+			have_reach = p2p_invite_reach(mesh.invite);
+			if (next_reach > 0 && next_reach >= have_reach &&
+				(next_reach > have_reach || strcmp(next, mesh.invite) != 0))
+			{
+				memcpy(mesh.invite, next, (size_t)invite_len + 1);
+				mesh.want_join_note = 1;
+				mesh.want_redial = 1;
+			}
+			break;
+		}
 		if (!mesh.searching || mesh.phase == MESH_PHASE_DONE || payload < 259)
 			break;
 		if (memcmp(body + 32, mesh.playlist, 16) != 0)
 			break;
-		/* Once a host has been chosen, a different client's offer is not this game. */
-		if (mesh.phase == MESH_PHASE_JOIN && !same_key(key, mesh.winner))
-			break;
-		if (mesh.phase == MESH_PHASE_OFFER)
+		/* An offer during the gather is early. After that, a search that has
+		already seen someone else waits until it chooses a host. A reply
+		that has not come back yet counts as someone else, so an offer cannot
+		take the search while a selected peer can still answer. A search that
+		is still alone can leave its lobby. A chosen host is the only offer
+		that joins. */
 		{
-			/* Someone found before the decision is already in this search.
-			A client who hears them only after deciding is still alone and can move. */
-			if (mesh.grouped)
-				break;
-			if (!mesh_solo_yields(!strcmp(mesh.playlist, "ranked"), mesh.account_level,
-				book_level(key), memcmp(key, mesh.public_key, 32) < 0))
-				break;
-		}
-		if (!strcmp(mesh.playlist, "ranked") && payload >= 263)
-		{
-			int mine;
-			int theirs;
+			unsigned now_ms = GetTickCount();
+			int gathering = mesh.phase == MESH_PHASE_GATHER;
+			int host_chosen = mesh.phase == MESH_PHASE_JOIN;
+			/* The first moment of the measurement is still collecting replies.
+			An offer in that moment does not take the search. */
+			int hearing = mesh.phase == MESH_PHASE_PING &&
+				(invites_young(now_ms) || now_ms - mesh.phase_at < (unsigned)MESH_PING_FLOOR_MS);
+			int waiting = peer_offer_invites(mesh.phase == MESH_PHASE_OFFER, candidate_count(),
+				invites_waiting_except(key));
+			int seen_others = peer_search_seen(other_candidates(key), waiting,
+				(mesh.phase == MESH_PHASE_OFFER && mesh.grouped) || hearing);
+			int yields = mesh_solo_yields(!strcmp(mesh.playlist, "ranked"), mesh.account_level,
+				book_level(key), memcmp(key, mesh.public_key, 32) < 0);
+			struct mesh_peer *offer_peer = peer_slot(key, 0);
+			int known_offer = candidate_slot(key, 0) != NULL;
+			int echoed_join = peer_offer_from_echo(offer_peer && offer_peer->echoed,
+				known_offer, other_candidates(key), invites_waiting_except(key),
+				hearing, gathering, host_chosen);
+			int alone_join = 0;
+			int locals = mesh.seats > 0 ? mesh.seats : 1;
+			int remote_seated = mesh.phase == MESH_PHASE_OFFER && mesh.we_host &&
+				peer_lobby_occupied(mesh.game_humans, locals, mesh.game_machines);
 
-			mine = our_rank_steps(GetTickCount());
-			theirs = mesh_rank_steps((int)read16(body + 261));
-			if (!mesh_ranked_together(mesh.account_level, mine, book_level(key), theirs))
+			/* a lobby that already has its players does not leave for an echo.
+			a rematch sets grouped for that reason. */
+			if (mesh.grouped)
+				echoed_join = 0;
+			if (mesh.phase == MESH_PHASE_OFFER && mesh.we_host && known_offer && !remote_seated)
+			{
+				int waited = mesh.phase_at && now_ms - mesh.phase_at >= (unsigned)MESH_HOST_ALONE_MS;
+
+				alone_join = peer_host_joins(0, memcmp(key, mesh.public_key, 32) < 0, waited);
+			}
+
+			if (mesh.phase != MESH_PHASE_JOIN && mesh.phase != MESH_PHASE_GATHER &&
+				mesh.phase != MESH_PHASE_PING && mesh.phase != MESH_PHASE_SCORE &&
+				mesh.phase != MESH_PHASE_OFFER)
+				break;
+			/* Answered their invite, and they are not in this lobby: their
+			offer is the game. The lower key would otherwise stay here alone.
+			A host lobby that still has only its own players takes the offer.
+			A player already sitting in the game keeps this host. */
+			if (!peer_offer_taken(peer_offer_accepted(gathering, host_chosen, same_key(key, mesh.winner),
+				seen_others, yields), echoed_join, alone_join, remote_seated))
 				break;
 		}
-		if (mesh.phase != MESH_PHASE_JOIN && mesh.phase != MESH_PHASE_GATHER && mesh.phase != MESH_PHASE_PING &&
-			mesh.phase != MESH_PHASE_SCORE && mesh.phase != MESH_PHASE_OFFER)
-			break;
+		if (!strcmp(mesh.playlist, "ranked"))
+		{
+			unsigned now_ms = GetTickCount();
+			int steps;
+
+			if (payload < 263)
+				break;
+			ranked_seen_note(key, now_ms);
+			steps = ranked_seen_steps(key, now_ms);
+			if (!mesh_ranked_together(mesh.account_level, steps, book_level(key), steps))
+				break;
+		}
 		{
 			int invite_len = body[50];
 
@@ -2311,9 +4015,249 @@ static void handle_packet(const unsigned char *packet, int size, unsigned long a
 		tally_store(key, match_id, name, text, packet, size);
 		break;
 	}
+	case MESH_TALLY_PART:
+		tally_take_part(key, packet, size, body, payload);
+		break;
 	default:
 		break;
 	}
+}
+
+/* The mesh socket's public address. The game tunnel's STUN answer names a
+different port, and a hello sent there never reaches this socket. */
+enum
+{
+	MESH_STUN_SERVERS = 2,
+	MESH_STUN_ATTEMPTS = 6,
+	MESH_STUN_RETRY_MS = 500,
+	MESH_STUN_REFRESH_MS = 25000
+};
+
+struct mesh_stun
+{
+	char host[64];
+	unsigned long address;
+	unsigned short port;
+	unsigned char transaction[12];
+	int attempts;
+	unsigned sent_at;
+	int has_mapped;
+	unsigned long mapped_address;
+	unsigned short mapped_port;
+};
+
+static struct mesh_stun mesh_stun_servers[MESH_STUN_SERVERS];
+static int mesh_stun_count;
+static int mesh_stun_parsed;
+static int mesh_stun_symmetric;
+
+static void mesh_stun_prepare(void)
+{
+	const char *text;
+
+	if (mesh_stun_parsed)
+		return;
+	mesh_stun_parsed = 1;
+	text = config_string("network.stun_servers");
+	if (!text)
+		return;
+	while (*text && mesh_stun_count < MESH_STUN_SERVERS)
+	{
+		const char *end = text + strcspn(text, ",");
+		struct mesh_stun *server = &mesh_stun_servers[mesh_stun_count];
+		const char *colon;
+		int length;
+
+		while (text < end && *text == ' ')
+			text++;
+		length = (int)(end - text);
+		while (length > 0 && text[length - 1] == ' ')
+			length--;
+		if (length > 0 && length < (int)sizeof(server->host))
+		{
+			memset(server, 0, sizeof(*server));
+			memcpy(server->host, text, (size_t)length);
+			colon = strchr(server->host, ':');
+			server->port = net16(3478);
+			if (colon)
+			{
+				server->port = net16((unsigned short)atoi(colon + 1));
+				server->host[colon - server->host] = 0;
+			}
+			mesh_stun_count++;
+		}
+		text = *end ? end + 1 : end;
+	}
+}
+
+static void mesh_stun_note(unsigned long address, unsigned short port)
+{
+	int index;
+	int differ = 0;
+
+	mesh.mapped_address = address;
+	mesh.mapped_port = port;
+	mesh.mapped = address && port;
+	if (!mesh.mapped_logged && mesh.mapped)
+	{
+		unsigned char bytes[4];
+
+		memcpy(bytes, &address, 4);
+		platform_log("peer mesh public address %u.%u.%u.%u:%u",
+			bytes[0], bytes[1], bytes[2], bytes[3], (unsigned)net16(port));
+		mesh.mapped_logged = 1;
+	}
+	for (index = 0; index < mesh_stun_count; index++)
+	{
+		if (mesh_stun_servers[index].has_mapped && mesh_stun_servers[index].mapped_port != port)
+			differ = 1;
+	}
+	if (differ && !mesh_stun_symmetric)
+	{
+		mesh_stun_symmetric = 1;
+		platform_log("peer mesh: this network gives each destination its own port, so a join can still fail to meet");
+	}
+}
+
+static int mesh_stun_take(const unsigned char *packet, int size, const struct sockaddr_in *from)
+{
+	int index;
+	int offset;
+
+	if (!packet || size < 20 || packet[0] != 0x01 || packet[1] != 0x01 || !from)
+		return 0;
+	for (index = 0; index < mesh_stun_count; index++)
+	{
+		struct mesh_stun *server = &mesh_stun_servers[index];
+
+		if (server->address && server->address == from->sin_addr.s_addr &&
+			server->port == from->sin_port && !memcmp(packet + 8, server->transaction, 12))
+			break;
+	}
+	if (index == mesh_stun_count)
+		return 0;
+	for (offset = 20; offset + 4 <= size; )
+	{
+		int type = (packet[offset] << 8) | packet[offset + 1];
+		int length = (packet[offset + 2] << 8) | packet[offset + 3];
+		const unsigned char *value = packet + offset + 4;
+
+		if (offset + 4 + length > size)
+			break;
+		if ((type == 0x0020 || type == 0x0001) && length >= 8 && value[1] == 0x01)
+		{
+			unsigned char port_bytes[2];
+			unsigned char ip[4];
+			int byte;
+			unsigned long address;
+			unsigned short port;
+
+			memcpy(port_bytes, value + 2, 2);
+			memcpy(ip, value + 4, 4);
+			if (type == 0x0020)
+			{
+				for (byte = 0; byte < 2; byte++)
+					port_bytes[byte] ^= packet[4 + byte];
+				for (byte = 0; byte < 4; byte++)
+					ip[byte] ^= packet[4 + byte];
+			}
+			memcpy(&address, ip, 4);
+			memcpy(&port, port_bytes, 2);
+			mesh_stun_servers[index].mapped_address = address;
+			mesh_stun_servers[index].mapped_port = port;
+			mesh_stun_servers[index].has_mapped = 1;
+			mesh_stun_note(address, port);
+			break;
+		}
+		offset += 4 + ((length + 3) & ~3);
+	}
+	return 1;
+}
+
+static void mesh_stun_send(unsigned now)
+{
+	int index;
+
+	if (mesh.socket < 0)
+		return;
+	for (index = 0; index < mesh_stun_count; index++)
+	{
+		struct mesh_stun *server = &mesh_stun_servers[index];
+		unsigned char request[20];
+		struct sockaddr_in to;
+		int due;
+
+		if (!server->address)
+			continue;
+		if (server->has_mapped || server->attempts >= MESH_STUN_ATTEMPTS)
+			due = !server->sent_at || now - server->sent_at >= MESH_STUN_REFRESH_MS;
+		else
+			due = !server->sent_at || now - server->sent_at >= MESH_STUN_RETRY_MS;
+		if (!due)
+			continue;
+		if (server->has_mapped || server->attempts >= MESH_STUN_ATTEMPTS)
+			server->attempts = 0;
+		memset(request, 0, sizeof(request));
+		request[1] = 0x01;
+		request[4] = 0x21;
+		request[5] = 0x12;
+		request[6] = 0xA4;
+		request[7] = 0x42;
+		if (!server->attempts)
+			posix_random_bytes(server->transaction, sizeof(server->transaction));
+		memcpy(request + 8, server->transaction, sizeof(server->transaction));
+		memset(&to, 0, sizeof(to));
+		to.sin_family = AF_INET;
+		to.sin_addr.s_addr = server->address;
+		to.sin_port = server->port;
+		posix_socket_sendto(mesh.socket, request, sizeof(request), 0, &to, (int)sizeof(to));
+		server->sent_at = now ? now : 1;
+		server->attempts++;
+	}
+}
+
+static void mesh_stun_resolve(void)
+{
+	char host[64];
+	int index = -1;
+	unsigned long address;
+	unsigned now;
+	int found;
+
+	pthread_mutex_lock(&mesh_lock);
+	now = GetTickCount();
+	for (found = 0; found < mesh_stun_count; found++)
+	{
+		struct mesh_stun *server = &mesh_stun_servers[found];
+
+		if (!server->host[0] || server->address)
+			continue;
+		if (server->attempts && (server->attempts < MESH_STUN_ATTEMPTS ||
+			(server->sent_at && now - server->sent_at < MESH_STUN_REFRESH_MS)))
+			continue;
+		memcpy(host, server->host, sizeof(host));
+		server->attempts = 0;
+		index = found;
+		break;
+	}
+	pthread_mutex_unlock(&mesh_lock);
+	if (index < 0)
+		return;
+	address = posix_resolve_ipv4(host);
+	pthread_mutex_lock(&mesh_lock);
+	if (index < mesh_stun_count && !strcmp(mesh_stun_servers[index].host, host) &&
+		!mesh_stun_servers[index].address)
+	{
+		if (address)
+			mesh_stun_servers[index].address = address;
+		else
+		{
+			platform_log("peer mesh: cannot look up the STUN server %s", host);
+			mesh_stun_servers[index].attempts = MESH_STUN_ATTEMPTS;
+			mesh_stun_servers[index].sent_at = GetTickCount();
+		}
+	}
+	pthread_mutex_unlock(&mesh_lock);
 }
 
 static void receive_all(void)
@@ -2329,6 +4273,10 @@ static void receive_all(void)
 
 		memset(&from, 0, sizeof(from));
 		got = posix_socket_recvfrom(mesh.socket, packet, (int)sizeof(packet), 0, &from, &from_len);
+		if (got < 0)
+			return;
+		if (mesh_stun_take(packet, got, &from))
+			continue;
 		if (got < 8 + 64)
 			return;
 		handle_packet(packet, got, from.sin_addr.s_addr, from.sin_port);
@@ -2412,6 +4360,10 @@ static void decide(void)
 	unsigned short mine;
 
 	mine = our_worst(&answered);
+	/* Reached nobody: the same 65535 as any other client that did not answer.
+	A 0 here would win against them, and every client would elect itself. */
+	if (answered <= 0)
+		mine = (unsigned short)65535;
 	memset(best_key, 0, sizeof(best_key));
 	/* A client in cooldown does not host. Leaving it in the comparison made
 	the search wait for an offer this machine will never send. */
@@ -2419,7 +4371,9 @@ static void decide(void)
 	{
 		memcpy(best_key, mesh.public_key, 32);
 		best_median = mine;
-		best_answered = answered;
+		/* One or none, the same rule as every other client. The number of
+		people this client reached would win a median tie on this machine only. */
+		best_answered = peer_score_answers(answered);
 		best_bans = (int)mesh.self_bans;
 		have = 1;
 	}
@@ -2459,11 +4413,7 @@ static void decide(void)
 				median = candidate->score_median;
 				if (median < measured)
 					median = measured;
-				answers = candidate->score_answered;
-				if (answers > MESH_CANDIDATES)
-					answers = MESH_CANDIDATES;
-				if (answers < 0)
-					answers = 0;
+				answers = peer_score_answers(candidate->rtt_count);
 			}
 		}
 		bans = candidate->bans;
@@ -2506,6 +4456,114 @@ static void decide(void)
 	platform_log("peer mesh: waiting for the host");
 }
 
+static void maybe_find(unsigned now)
+{
+	unsigned gap;
+
+	if (mesh.phase != MESH_PHASE_GATHER && mesh.phase != MESH_PHASE_PING &&
+		mesh.phase != MESH_PHASE_SCORE && mesh.phase != MESH_PHASE_OFFER)
+		return;
+	gap = mesh.phase == MESH_PHASE_OFFER ? (unsigned)MESH_FIND_OFFER_MS : (unsigned)MESH_FIND_MS;
+	if (mesh.last_find && now - mesh.last_find < gap)
+		return;
+	send_find();
+	mesh.last_find = now ? now : 1;
+}
+
+static void release_invite(struct mesh_peer *peer)
+{
+	peer->answer_sent = 0;
+	peer->answer_at = 0;
+	peer->answer_tries = 0;
+	peer->answer_address = 0;
+	peer->answer_port = 0;
+	peer->answer_seats = 0;
+	memset(peer->answer_nonce, 0, 16);
+	memset(peer->answer_name, 0, sizeof(peer->answer_name));
+}
+
+static void refresh_invites(unsigned now)
+{
+	int index;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+		unsigned age;
+
+		if (!peer->used || !peer->answer_sent)
+			continue;
+		if (candidate_slot(peer->key, 0))
+			continue;
+		if (!peer->answer_at || now < peer->answer_at)
+			peer->answer_at = now ? now : 1;
+		age = now - peer->answer_at;
+		if (age >= (unsigned)MESH_INVITE_EXPIRE_MS)
+		{
+			release_invite(peer);
+			continue;
+		}
+		/* Send again until they answer. One send can land while they are
+		still gathering, and the next one arrives once they can echo it. */
+		if (peer->answer_tries < 4 && age >= (unsigned)peer->answer_tries * (unsigned)MESH_INVITE_RETRY_MS &&
+			peer->answer_address && peer->answer_port && !nonce_blank(peer->answer_nonce))
+		{
+			peer->answer_tries++;
+			send_answer_to(peer->answer_address, peer->answer_port, 0, peer->answer_nonce);
+		}
+	}
+}
+
+static int invites_young(unsigned now)
+{
+	int index;
+	int count = 0;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+		unsigned age;
+
+		if (!peer->used || !peer->answer_sent)
+			continue;
+		if (candidate_slot(peer->key, 0))
+			continue;
+		age = peer->answer_at && now >= peer->answer_at ? now - peer->answer_at : 0;
+		if (age < (unsigned)MESH_INVITE_YOUNG_MS)
+			count++;
+	}
+	return count;
+}
+
+static int pings_settled(unsigned now)
+{
+	int index;
+
+	for (index = 0; index < MESH_CANDIDATES; index++)
+	{
+		struct mesh_candidate *candidate = &mesh.candidates[index];
+
+		if (!candidate->used || candidate->rtt_count > 0)
+			continue;
+		if (candidate->pings_sent < 1 || !candidate->sent_at || now - candidate->sent_at < 300)
+			return 0;
+	}
+	return 1;
+}
+
+static int scores_ready(void)
+{
+	int index;
+
+	for (index = 0; index < MESH_CANDIDATES; index++)
+	{
+		if (mesh.candidates[index].used && mesh.candidates[index].rtt_count > 0 &&
+			!mesh.candidates[index].score_have)
+			return 0;
+	}
+	return 1;
+}
+
 static void search_tick(void)
 {
 	unsigned now = GetTickCount();
@@ -2513,43 +4571,26 @@ static void search_tick(void)
 
 	if (!mesh.searching)
 		return;
-	/* Widen only after the first gather. Expanding during those seconds
-	would drop a high lobby before the other party has time to answer. */
-	if (!strcmp(mesh.playlist, "ranked") &&
-		(mesh.phase == MESH_PHASE_OFFER || mesh.phase == MESH_PHASE_JOIN))
-	{
-		int others = 0;
-		int seats = mesh.seats > 0 ? mesh.seats : 1;
-		int index;
-
-		for (index = 0; index < MESH_CANDIDATES; index++)
-		{
-			if (!mesh.candidates[index].used)
-				continue;
-			seats += mesh.candidates[index].seats > 0 ? mesh.candidates[index].seats : 1;
-			others = 1;
-		}
-		if (!others && seats < 8 && mesh.rank_extra < 363 &&
-			(!mesh.rank_extra_at || now - mesh.rank_extra_at >= 1000))
-		{
-			mesh.rank_extra++;
-			mesh.rank_extra_at = now;
-		}
-	}
 	if (mesh.phase == MESH_PHASE_COOLDOWN)
 	{
 		if (!peer_in_cooldown(mesh.self_until, unix_now()))
 		{
 			mesh.phase = MESH_PHASE_GATHER;
 			mesh.phase_at = now;
+			mesh.last_find = 0;
 		}
 		return;
 	}
+	maybe_find(now);
+	refresh_invites(now);
 	if (mesh.phase == MESH_PHASE_GATHER)
 	{
-		send_find();
 		if (now - mesh.phase_at >= MESH_GATHER_MS)
 		{
+			/* New peers from the last minute, then one random draw of the
+			known peers who broadcast in the last two minutes. The replies
+			go out together. A peer fills a seat only after they answer. */
+			draw_search(now);
 			mesh.phase = MESH_PHASE_PING;
 			mesh.phase_at = now;
 		}
@@ -2563,7 +4604,7 @@ static void search_tick(void)
 
 			if (!candidate->used || candidate->pings_sent >= 3)
 				continue;
-			if (candidate->sent_at && now - candidate->sent_at < 400)
+			if (candidate->sent_at && now - candidate->sent_at < (unsigned)MESH_PING_GAP_MS)
 				continue;
 			posix_random_bytes(&candidate->nonce, 4);
 			candidate->sent_at = now;
@@ -2580,24 +4621,30 @@ static void search_tick(void)
 			write32(packet + 40, candidate->nonce);
 			send_to(packet, packet_finish(packet, 36), candidate->address, candidate->port);
 		}
-		if (now - mesh.phase_at >= MESH_PING_MS)
+		/* Wait for the replies that are still on the way, and for one round
+		trip from each peer who answered. Then choose the host. A reply that
+		never comes back does not hold the search open. */
+		if (now - mesh.phase_at >= (unsigned)MESH_PING_CAP_MS ||
+			(now - mesh.phase_at >= (unsigned)MESH_PING_FLOOR_MS &&
+				!invites_young(now) && pings_settled(now)))
 		{
 			send_score();
 			mesh.phase = MESH_PHASE_SCORE;
 			mesh.phase_at = now;
 		}
 	}
-	if (mesh.phase == MESH_PHASE_SCORE && now - mesh.phase_at >= MESH_SCORE_MS)
+	if (mesh.phase == MESH_PHASE_SCORE && (scores_ready() || now - mesh.phase_at >= (unsigned)MESH_SCORE_MS))
 		decide();
 	if (mesh.phase == MESH_PHASE_OFFER)
 	{
-		if (!mesh.last_offer || now - mesh.last_offer >= 500)
+		if (!mesh.lobby_full && (!mesh.last_offer || now - mesh.last_offer >= (unsigned)MESH_WIDE_OFFER_MS))
 		{
-			send_offer();
+			send_offer(1);
 			mesh.last_offer = now;
 		}
-		/* The lobby's start time follows the search. A full lobby, or a social
-		search that has been open for 100 seconds, has to reach the host. */
+		/* The lobby's start time follows the search. Free for all starts once
+		two people are seated. 2v2 starts when all four seats are filled.
+		That time has to reach the host. */
 		if (mesh.we_host && (!mesh.host_note_at || now - mesh.host_note_at >= 1000))
 		{
 			mesh.want_host_note = 1;
@@ -2608,10 +4655,20 @@ static void search_tick(void)
 	{
 		mesh.retries++;
 		if (mesh.retries > 1)
-			mesh.phase = MESH_PHASE_DONE;
+		{
+			/* Two waits produced no game. Leave the search, so Find Game
+			can be opened again instead of staying up and deaf. */
+			mesh.phase = MESH_PHASE_IDLE;
+			mesh.searching = 0;
+			mesh.have_match = 0;
+			mesh.give_up = 1;
+			mesh.generation++;
+		}
 		else
 		{
 			memset(mesh.candidates, 0, sizeof(mesh.candidates));
+			clear_answers();
+			mesh.last_find = 0;
 			mesh.phase = MESH_PHASE_GATHER;
 			mesh.phase_at = now;
 		}
@@ -2653,12 +4710,45 @@ static void send_pending_result(unsigned now)
 			mesh.result_sent_at = now ? now : 1;
 			return;
 		}
-		send_out(packet, sent);
+		send_reachable(packet, sent);
 	}
 	mesh.result_sends_left--;
 	mesh.result_sent_at = now ? now : 1;
 	if (mesh.result_sends_left <= 0)
 		mesh.result_send = 0;
+}
+
+/* the search has stopped, and the host still sends the invite. a public
+address learned from STUN after the lobby opened has to reach the joiners. */
+static void offer_late(unsigned now)
+{
+	if (!mesh.late_offer || mesh.searching || !mesh.we_host || !mesh.have_match || mesh.lobby_full)
+		return;
+	if (!mesh.late_offer_at)
+		mesh.late_offer_at = now ? now : 1;
+	if (now - mesh.late_offer_at >= 30000)
+	{
+		mesh.late_offer = 0;
+		return;
+	}
+	if (mesh.last_offer && now - mesh.last_offer < (unsigned)MESH_LATE_OFFER_MS)
+		return;
+	send_offer(0);
+	mesh.last_offer = now ? now : 1;
+}
+
+static int directory_has_greet(void)
+{
+	int index;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (peer->used && peer->greet && peer->address && peer->port && !peer_is_seed(peer))
+			return 1;
+	}
+	return 0;
 }
 
 static void mesh_tick_locked(void)
@@ -2669,6 +4759,7 @@ static void mesh_tick_locked(void)
 	if (!mesh.standings_ready)
 	{
 		load_standings();
+		load_applied();
 		mesh.standings_ready = 1;
 		note_sync_ours();
 	}
@@ -2677,15 +4768,60 @@ static void mesh_tick_locked(void)
 	open_socket();
 	if (!mesh.ready)
 		return;
+	mesh_stun_prepare();
 	receive_all();
 	now = GetTickCount();
+	mesh_stun_send(now);
 	if (!mesh.last_hello || now - mesh.last_hello >= MESH_HELLO_MS)
 	{
+		int carry_list;
+		int sent_list;
+
+		prune_peers();
+		mesh.announce = 1;
+		mesh.targets_ready = 0;
+		mesh.used_targets = 0;
+		/* Every other hello carries the short list. An introduction
+		   carries it too. The introducer is sent the list with whichever
+		   hello reached it. Greet stays set until that list goes out, so a
+		   search packet cannot spend the introduction. */
+		mesh.list_toggle ^= 1;
+		carry_list = mesh.list_toggle || directory_has_greet();
+		mesh.seed_sent = 0;
+		sent_list = 0;
 		send_hello();
-		send_peers();
+		if (carry_list)
+			sent_list = send_peers();
+		else if (mesh.seed_sent)
+			send_peers_to_seeds();
+		/* The pair window is only for this hello and its list. A find or
+		   an offer later in this tick stays on the ordinary schedule. */
+		mesh.seed_pair = 0;
+		if (sent_list && mesh.used_targets)
+		{
+			int slot;
+
+			for (slot = 0; slot < mesh.target_count; slot++)
+			{
+				int index = mesh.targets[slot];
+
+				if (index >= 0 && index < MESH_PEERS_MAX)
+					mesh.peers[index].greet = 0;
+			}
+		}
+		else if (sent_list)
+		{
+			int index;
+
+			for (index = 0; index < MESH_PEERS_MAX; index++)
+				mesh.peers[index].greet = 0;
+		}
+		mesh.announce = 0;
+		mesh.targets_ready = 0;
 		mesh.last_hello = now;
 	}
 	search_tick();
+	offer_late(now);
 	send_pending_result(now);
 	if (!mesh.last_tally || now - mesh.last_tally >= 1000)
 	{
@@ -2696,7 +4832,7 @@ static void mesh_tick_locked(void)
 	if (mesh.strike_relays > 0 && mesh.strike_packet_size > 0 &&
 		(!mesh.strike_relay_at || now - mesh.strike_relay_at >= 1000))
 	{
-		send_out(mesh.strike_packet, mesh.strike_packet_size);
+		send_reachable(mesh.strike_packet, mesh.strike_packet_size);
 		mesh.strike_relays--;
 		mesh.strike_relay_at = now ? now : 1;
 	}
@@ -2706,6 +4842,70 @@ static void mesh_tick_locked(void)
 		save_strikes();
 		mesh.last_save = now;
 	}
+}
+
+/* one name per pass. the lookup blocks, so it stays off mesh_lock. */
+static void mesh_seed_resolve(void)
+{
+	char host[64];
+	int index = -1;
+	unsigned long address;
+	unsigned now;
+	int found;
+
+	pthread_mutex_lock(&mesh_lock);
+	now = GetTickCount();
+	if (!now)
+		now = 1;
+	for (found = 0; found < MESH_SEED_COUNT; found++)
+	{
+		struct mesh_seed *seed = &mesh_seeds[found];
+		unsigned wait = seed->failed ? (unsigned)MESH_SEED_RETRY_MS : (unsigned)MESH_SEED_REFRESH_MS;
+
+		if (seed->resolved_at && now - seed->resolved_at < wait)
+			continue;
+		snprintf(host, sizeof(host), "%s", mesh_seed_names[found]);
+		index = found;
+		break;
+	}
+	pthread_mutex_unlock(&mesh_lock);
+	if (index < 0)
+		return;
+	address = posix_resolve_ipv4(host);
+	pthread_mutex_lock(&mesh_lock);
+	if (index < MESH_SEED_COUNT && !strcmp(mesh_seed_names[index], host))
+	{
+		struct mesh_seed *seed = &mesh_seeds[index];
+		unsigned stamped = GetTickCount();
+
+		if (!stamped)
+			stamped = 1;
+		seed->resolved_at = stamped;
+		if (address)
+		{
+			if (seed->address != address || seed->failed)
+			{
+				unsigned char bytes[4];
+
+				memcpy(bytes, &address, 4);
+				platform_log("peer mesh seed %s is %u.%u.%u.%u", host,
+					bytes[0], bytes[1], bytes[2], bytes[3]);
+			}
+			seed->address = address;
+			seed->failed = 0;
+			seed->logged_failure = 0;
+		}
+		else
+		{
+			seed->failed = 1;
+			if (!seed->logged_failure)
+			{
+				platform_log("peer mesh: cannot look up the seed %s", host);
+				seed->logged_failure = 1;
+			}
+		}
+	}
+	pthread_mutex_unlock(&mesh_lock);
 }
 
 static void *mesh_thread(void *unused)
@@ -2720,10 +4920,15 @@ static void *mesh_thread(void *unused)
 		int sync_level = 0;
 		int sync_wins = 0;
 		int sync_losses = 0;
+		int searching = 0;
+		int redial = 0;
+		int give_up = 0;
+		unsigned snap_generation = 0;
 		char playlist[16];
 		char invite[160];
 		unsigned char match[16];
 
+		mesh_seed_resolve();
 		{
 			struct rank_account account;
 
@@ -2770,10 +4975,18 @@ static void *mesh_thread(void *unused)
 			memcpy(playlist, mesh.playlist, sizeof(playlist));
 			memcpy(match, mesh.match_id, sizeof(match));
 		}
+		if (mesh.give_up)
+		{
+			mesh.give_up = 0;
+			give_up = 1;
+		}
 		if (mesh.want_join_note)
 		{
 			mesh.want_join_note = 0;
 			join = 1;
+			redial = mesh.want_redial;
+			mesh.want_redial = 0;
+			snap_generation = mesh.generation;
 			memcpy(playlist, mesh.playlist, sizeof(playlist));
 			memcpy(invite, mesh.invite, sizeof(invite));
 			memcpy(match, mesh.match_id, sizeof(match));
@@ -2787,6 +5000,7 @@ static void *mesh_thread(void *unused)
 			sync_losses = mesh.sync_losses;
 			mesh.sync_have = 0;
 		}
+		searching = mesh.searching;
 		pthread_mutex_unlock(&mesh_lock);
 		if (sync_have)
 			rank_mesh_progress(sync_games, sync_level, sync_wins, sync_losses);
@@ -2799,17 +5013,30 @@ static void *mesh_thread(void *unused)
 				snprintf(text + index * 2, 3, "%02x", match[index]);
 			matchmaking_note_mesh(1, playlist, 0, "", text);
 		}
-		if (join)
+		if (give_up)
+			matchmaking_reset();
+		if (join && !give_up)
 		{
 			char text[40];
 			int index;
+			int dial = 0;
 
 			for (index = 0; index < 16; index++)
 				snprintf(text + index * 2, 3, "%02x", match[index]);
 			matchmaking_note_mesh(0, playlist, 0, invite, text);
+			if (redial)
+			{
+				pthread_mutex_lock(&mesh_lock);
+				dial = mesh.generation == snap_generation && mesh.have_match &&
+					strcmp(mesh.invite, invite) == 0;
+				pthread_mutex_unlock(&mesh_lock);
+			}
+			if (dial)
+				p2p_join_invite(invite);
 		}
 		mesh_account_serve();
-		posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, 0, 200000, 0);
+		mesh_stun_resolve();
+		posix_socket_select(NULL, NULL, NULL, NULL, NULL, NULL, 0, searching ? 50000 : 200000, 0);
 	}
 	return NULL;
 }
@@ -2847,23 +5074,86 @@ void peer_mesh_search(const char *playlist, int seats)
 	memset(mesh.candidates, 0, sizeof(mesh.candidates));
 	memset(mesh.winner, 0, sizeof(mesh.winner));
 	mesh.searching = 1;
+	mesh.lobby_full = 0;
 	mesh.we_host = 0;
 	mesh.retries = 0;
 	mesh.want_host_note = 0;
 	mesh.want_join_note = 0;
+	mesh.want_redial = 0;
+	mesh.late_offer = 0;
+	mesh.late_offer_at = 0;
+	mesh.have_match = 0;
+	mesh.give_up = 0;
+	mesh.generation++;
 	mesh.published = 0;
 	mesh.grouped = 0;
 	memset(mesh.reports, 0, sizeof(mesh.reports));
 	mesh.seats = seats;
+	mesh.game_humans = 0;
+	mesh.game_machines = 0;
+	/* The id is 16 bytes on the wire. A shorter playlist has to clear the
+	tail of the previous one, or the compare misses every player. */
+	memset(mesh.playlist, 0, sizeof(mesh.playlist));
 	snprintf(mesh.playlist, sizeof(mesh.playlist), "%s", playlist);
+	mesh.last_offer = 0;
 	mesh.search_at = GetTickCount();
 	mesh.phase_at = mesh.search_at;
-	mesh.rank_extra = 0;
-	mesh.rank_extra_at = mesh.search_at ? mesh.search_at : 1;
+	mesh.last_find = 0;
+	ranked_seen_clear();
+	clear_answers();
 	if (peer_in_cooldown(mesh.self_until, unix_now()))
 		mesh.phase = MESH_PHASE_COOLDOWN;
 	else
 		mesh.phase = MESH_PHASE_GATHER;
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+void peer_mesh_set_lobby_full(int full)
+{
+	pthread_mutex_lock(&mesh_lock);
+	mesh.lobby_full = full ? 1 : 0;
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+void peer_mesh_set_game_humans(int humans)
+{
+	if (humans < 0)
+		humans = 0;
+	pthread_mutex_lock(&mesh_lock);
+	mesh.game_humans = humans;
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+void peer_mesh_set_game_machines(int machines)
+{
+	if (machines < 0)
+		machines = 0;
+	pthread_mutex_lock(&mesh_lock);
+	mesh.game_machines = machines;
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+void peer_mesh_set_rematch(const unsigned char id[16])
+{
+	if (!id)
+		return;
+	pthread_mutex_lock(&mesh_lock);
+	memcpy(mesh.match_id, id, 16);
+	mesh.have_match = 1;
+	mesh.we_host = 1;
+	mesh.searching = 1;
+	/* the lobby already has its players, so another host's offer does not
+	take this one. */
+	mesh.grouped = 1;
+	mesh.phase = MESH_PHASE_OFFER;
+	mesh.phase_at = GetTickCount();
+	mesh.late_offer = 0;
+	mesh.late_offer_at = 0;
+	mesh.lobby_full = 0;
+	mesh.give_up = 0;
+	mesh.want_host_note = 1;
+	mesh.host_note_at = 0;
+	mesh.last_offer = 0;
 	pthread_mutex_unlock(&mesh_lock);
 }
 
@@ -2874,6 +5164,11 @@ void peer_mesh_stop(void)
 	mesh.phase = MESH_PHASE_IDLE;
 	mesh.want_host_note = 0;
 	mesh.want_join_note = 0;
+	mesh.want_redial = 0;
+	mesh.give_up = 0;
+	mesh.generation++;
+	mesh.late_offer = 0;
+	mesh.late_offer_at = 0;
 	mesh.result_unbound_used = 0;
 	pthread_mutex_unlock(&mesh_lock);
 }
@@ -2950,6 +5245,152 @@ int peer_mesh_party_names(char names[][12], int max)
 	return count;
 }
 
+static int level_for_key_locked(const unsigned char key[32])
+{
+	int index;
+
+	for (index = 0; index < MESH_PEERS_MAX; index++)
+	{
+		struct mesh_peer *peer = &mesh.peers[index];
+
+		if (!peer->used || !same_key(peer->key, key))
+			continue;
+		if (peer->looking_level_known)
+			return peer->looking_level < 0 ? 0 : peer->looking_level;
+		break;
+	}
+	return book_level(key);
+}
+
+/* the server numbers a second copy of a name ("New001 2"). that row is the
+install that announced the name before the number. */
+static int row_name_matches(const char *row, const char *announced)
+{
+	size_t length;
+	const char *suffix;
+
+	if (!row || !row[0] || !announced || !announced[0])
+		return 0;
+	if (strcmp(row, announced) == 0)
+		return 1;
+	length = strlen(announced);
+	if (strncmp(row, announced, length) != 0 || row[length] != ' ')
+		return 0;
+	suffix = row + length + 1;
+	if (!suffix[0])
+		return 0;
+	while (*suffix)
+	{
+		if (*suffix < '0' || *suffix > '9')
+			return 0;
+		suffix++;
+	}
+	return 1;
+}
+
+/* 1 keeps the only key. 2 is two installs, which is not one player's. */
+static void note_name_key(unsigned char key[32], int *matches, const unsigned char *candidate)
+{
+	if (*matches == 1 && !same_key(key, candidate))
+	{
+		*matches = 2;
+		return;
+	}
+	if (*matches == 0)
+	{
+		memcpy(key, candidate, 32);
+		*matches = 1;
+	}
+}
+
+int peer_mesh_player(const char *name, int machine, char *mesh_id, int mesh_id_size, int *level,
+	unsigned long address)
+{
+	unsigned char key[32];
+	char text[16];
+	int found = 0;
+	int score = 0;
+	int index;
+
+	if (mesh_id && mesh_id_size > 0)
+		mesh_id[0] = 0;
+	if (level)
+		*level = -1;
+	pthread_mutex_lock(&mesh_lock);
+	if (machine >= 0 && machine < MESH_MACHINES && mesh.machine_have[machine])
+	{
+		memcpy(key, mesh.machine_key[machine], 32);
+		found = 1;
+	}
+	/* two machines can share a gamertag. a row in the game is not this
+	install just because the name matches. */
+	if (!found && machine < 0 && name && name[0] && mesh.have_key && mesh.account_name[0] &&
+		!strcmp(mesh.account_name, name))
+	{
+		memcpy(key, mesh.public_key, 32);
+		found = 1;
+	}
+	if (!found && name && name[0])
+	{
+		int matches = 0;
+
+		for (index = 0; index < MESH_PEERS_MAX; index++)
+		{
+			struct mesh_peer *peer = &mesh.peers[index];
+
+			if (!peer->used || !row_name_matches(name, peer->looking_name))
+				continue;
+			note_name_key(key, &matches, peer->key);
+		}
+		for (index = 0; index < MESH_CANDIDATES; index++)
+		{
+			if (!mesh.candidates[index].used || !row_name_matches(name, mesh.candidates[index].name))
+				continue;
+			note_name_key(key, &matches, mesh.candidates[index].key);
+		}
+		found = matches == 1;
+	}
+	/* the name on the row can differ from the name that search announced.
+	the game connection is the install that spoke from that address. two
+	installs on one address stay unnamed. */
+	if (!found && address)
+	{
+		int matches = 0;
+
+		for (index = 0; index < MESH_PEERS_MAX; index++)
+		{
+			struct mesh_peer *peer = &mesh.peers[index];
+
+			if (!peer->used || !peer->heard)
+				continue;
+			if (peer->address != address && peer->looking_address != address)
+				continue;
+			if (matches && !same_key(key, peer->key))
+			{
+				matches = 2;
+				break;
+			}
+			memcpy(key, peer->key, 32);
+			matches = 1;
+		}
+		found = matches == 1;
+	}
+	if (found)
+		score = level_for_key_locked(key);
+	pthread_mutex_unlock(&mesh_lock);
+	if (!found)
+		return 0;
+	text[0] = 0;
+	mesh_identity(key, NULL, 0, NULL, 0, text, (int)sizeof(text));
+	if (!text[0])
+		return 0;
+	if (mesh_id && mesh_id_size > 0)
+		snprintf(mesh_id, (size_t)mesh_id_size, "%s", text);
+	if (level)
+		*level = score < 0 ? 0 : score;
+	return 1;
+}
+
 int peer_mesh_party_for_key(const unsigned char key[32])
 {
 	int party = 1;
@@ -2995,6 +5436,12 @@ void peer_mesh_publish_result(const char *body)
 	if (!body || !body[0])
 		return;
 	pthread_mutex_lock(&mesh_lock);
+	/* A regular internet game has no mesh match. It does not change rank. */
+	if (!mesh.have_match)
+	{
+		pthread_mutex_unlock(&mesh_lock);
+		return;
+	}
 	snprintf(mesh.result_out, sizeof(mesh.result_out), "%s", body);
 	mesh.result_sends_left = 5;
 	mesh.result_sent_at = 0;
@@ -3025,48 +5472,90 @@ int peer_mesh_roster(unsigned char keys[][32], int max)
 
 int peer_mesh_submit_tally(const char *match_id, const char *name, const char *tally)
 {
-	unsigned char packet[MESH_MAX_PACKET];
+	unsigned char packets[MESH_TALLY_PARTS][MESH_MAX_PACKET];
+	int sizes[MESH_TALLY_PARTS];
 	int text_len;
-	int payload;
-	int sent;
+	int count;
+	int index;
+	int sent = 0;
 
 	if (!match_id || !match_id[0] || !tally)
 		return 0;
 	text_len = (int)strlen(tally);
 	if (text_len <= 0 || text_len >= MESH_TALLY_TEXT)
 		return 0;
-	payload = 86 + text_len;
-	if (8 + payload + 64 > MESH_MAX_PACKET)
+	/* One packet when the text fits. A free for all of sixteen names does
+	not, so the same text goes out in numbered pieces. */
+	count = 8 + 86 + text_len + 64 <= MESH_MAX_PACKET ? 1 :
+		(text_len + MESH_TALLY_CHUNK - 1) / MESH_TALLY_CHUNK;
+	if (count < 1 || count > MESH_TALLY_PARTS)
 		return 0;
 	pthread_mutex_lock(&mesh_lock);
 	load_identity();
-	if (!mesh.have_key)
+	/* Games played and rank come from this mesh match only. A later game keeps
+	its own scoreboard, even when an older match flag is still set. */
+	if (!mesh.have_key || !mesh.have_match || !match_text_is(match_id, mesh.match_id))
 	{
 		pthread_mutex_unlock(&mesh_lock);
 		return 0;
 	}
-	memset(packet, 0, sizeof(packet));
-	packet[0] = MESH_MAGIC0;
-	packet[1] = MESH_MAGIC1;
-	packet[2] = MESH_MAGIC2;
-	packet[3] = MESH_MAGIC3;
-	packet[4] = MESH_VERSION;
-	packet[5] = MESH_TALLY;
-	write16(packet + 6, (unsigned short)payload);
-	memcpy(packet + 8, mesh.public_key, 32);
-	snprintf((char *)(packet + 40), 40, "%s", match_id);
-	if (name)
-		snprintf((char *)(packet + 80), 12, "%s", name);
-	write16(packet + 92, (unsigned short)text_len);
-	memcpy(packet + 94, tally, (size_t)text_len);
-	sent = packet_finish(packet, payload);
-	if (sent > 0)
+	for (index = 0; index < count; index++)
 	{
-		tally_store(mesh.public_key, match_id, name ? name : "", tally, packet, sent);
-		send_out(packet, sent);
+		int offset = index * MESH_TALLY_CHUNK;
+		int part_len = count == 1 ? text_len : text_len - offset;
+		int payload;
+		unsigned char *packet = packets[index];
+
+		if (count > 1 && part_len > MESH_TALLY_CHUNK)
+			part_len = MESH_TALLY_CHUNK;
+		payload = count == 1 ? 86 + part_len : 90 + part_len;
+		if (part_len <= 0 || 8 + payload + 64 > MESH_MAX_PACKET)
+		{
+			pthread_mutex_unlock(&mesh_lock);
+			return 0;
+		}
+		memset(packet, 0, MESH_MAX_PACKET);
+		packet[0] = MESH_MAGIC0;
+		packet[1] = MESH_MAGIC1;
+		packet[2] = MESH_MAGIC2;
+		packet[3] = MESH_MAGIC3;
+		packet[4] = MESH_VERSION;
+		packet[5] = count == 1 ? MESH_TALLY : MESH_TALLY_PART;
+		write16(packet + 6, (unsigned short)payload);
+		memcpy(packet + 8, mesh.public_key, 32);
+		snprintf((char *)(packet + 40), 40, "%s", match_id);
+		if (name)
+			snprintf((char *)(packet + 80), 12, "%s", name);
+		if (count == 1)
+		{
+			write16(packet + 92, (unsigned short)text_len);
+			memcpy(packet + 94, tally, (size_t)text_len);
+		}
+		else
+		{
+			write16(packet + 92, (unsigned short)text_len);
+			packet[94] = (unsigned char)index;
+			packet[95] = (unsigned char)count;
+			write16(packet + 96, (unsigned short)part_len);
+			memcpy(packet + 98, tally + offset, (size_t)part_len);
+		}
+		sizes[index] = packet_finish(packet, payload);
+		if (sizes[index] <= 0)
+		{
+			pthread_mutex_unlock(&mesh_lock);
+			return 0;
+		}
+	}
+	tally_store(mesh.public_key, match_id, name ? name : "", tally, packets[0], sizes[0]);
+	if (count > 1)
+		tally_attach_raws(mesh.public_key, match_id, tally, packets, sizes, count);
+	for (index = 0; index < count; index++)
+	{
+		send_reachable(packets[index], sizes[index]);
+		sent = 1;
 	}
 	pthread_mutex_unlock(&mesh_lock);
-	return sent > 0;
+	return sent;
 }
 
 int peer_mesh_take_result(char *body, int size)
@@ -3081,6 +5570,47 @@ int peer_mesh_take_result(char *body, int size)
 		snprintf(body, (size_t)size, "%s", mesh.result_in);
 		mesh.result_have = 0;
 		have = 1;
+	}
+	pthread_mutex_unlock(&mesh_lock);
+	return have;
+}
+
+void peer_mesh_introduce(const unsigned char key[32], unsigned long address, unsigned short port)
+{
+	pthread_mutex_lock(&mesh_lock);
+	introduce_locked(key, address, port);
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+void peer_mesh_greet(unsigned long address, unsigned short port)
+{
+	unsigned short dest;
+
+	if (!address)
+		return;
+	dest = port ? port : net16(MESH_PORT);
+	pthread_mutex_lock(&mesh_lock);
+	load_identity();
+	if (mesh.ready)
+	{
+		send_hello_to(address, dest);
+		send_peers_to(address, dest);
+	}
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+int peer_mesh_mapped(unsigned long *address, unsigned short *port)
+{
+	int have;
+
+	pthread_mutex_lock(&mesh_lock);
+	have = mesh.mapped && mesh.mapped_address && mesh.mapped_port;
+	if (have)
+	{
+		if (address)
+			*address = mesh.mapped_address;
+		if (port)
+			*port = mesh.mapped_port;
 	}
 	pthread_mutex_unlock(&mesh_lock);
 	return have;
@@ -3117,6 +5647,18 @@ int peer_mesh_verify(const unsigned char key[32], const void *message, int size,
 	return verify_key(key, message, size, signature);
 }
 
+static int match_text_is(const char *text, const unsigned char id[16])
+{
+	char hex[40];
+	int index;
+
+	if (!text || !id)
+		return 0;
+	for (index = 0; index < 16; index++)
+		snprintf(hex + index * 2, 3, "%02x", id[index]);
+	return strcmp(hex, text) == 0;
+}
+
 int peer_mesh_match(unsigned char match[16])
 {
 	int have;
@@ -3131,6 +5673,34 @@ int peer_mesh_match(unsigned char match[16])
 		memset(match, 0, 16);
 	pthread_mutex_unlock(&mesh_lock);
 	return have;
+}
+
+int peer_mesh_match_is(const char *text)
+{
+	int same;
+
+	pthread_mutex_lock(&mesh_lock);
+	same = mesh.have_match && match_text_is(text, mesh.match_id);
+	pthread_mutex_unlock(&mesh_lock);
+	return same;
+}
+
+void peer_mesh_drop_match(void)
+{
+	pthread_mutex_lock(&mesh_lock);
+	mesh.have_match = 0;
+	pthread_mutex_unlock(&mesh_lock);
+}
+
+void peer_mesh_arm_late_offer(void)
+{
+	pthread_mutex_lock(&mesh_lock);
+	if (mesh.we_host && mesh.have_match)
+	{
+		mesh.late_offer = 1;
+		mesh.late_offer_at = 0;
+	}
+	pthread_mutex_unlock(&mesh_lock);
 }
 
 void peer_mesh_note_machine(int machine, const unsigned char key[32])
@@ -3331,7 +5901,7 @@ void peer_mesh_cast_vote(const unsigned char target[32], const unsigned char hos
 	if (handle_report(packet + 8, payload) > 0)
 		size = packet_finish(packet, payload);
 	if (size > 0)
-		send_out(packet, size);
+		send_reachable(packet, size);
 	pthread_mutex_unlock(&mesh_lock);
 }
 
@@ -3351,18 +5921,33 @@ void peer_mesh_publish_ban(const unsigned char target[32], int votes, int player
 		pthread_mutex_unlock(&mesh_lock);
 		return;
 	}
-	kept = fill_report_packet(packet, target, players, 0, votes);
-	payload = 114 + kept * 96;
-	if (peer_report_accepted(kept, players))
 	{
-		int size = 0;
-		int status = handle_report(packet + 8, payload);
+		int skip = 0;
+		int sent_any = 0;
 
-		if (status > 0)
-			size = packet_finish(packet, payload);
-		if (size > 0)
+		/* One packet holds eight signatures. A larger game sends the rest
+		in further packets, and the receivers add them before they decide. */
+		while (skip < votes)
 		{
-			send_out(packet, size);
+			int size = 0;
+			int status;
+
+			kept = fill_report_packet(packet, target, players, skip, 8);
+			if (kept < 1)
+				break;
+			payload = 114 + kept * 96;
+			status = handle_report(packet + 8, payload);
+			if (status > 0)
+				size = packet_finish(packet, payload);
+			if (size > 0)
+			{
+				send_reachable(packet, size);
+				sent_any = 1;
+			}
+			skip += kept;
+		}
+		if (sent_any)
+		{
 			memcpy(mesh.published_target, target, 32);
 			mesh.published = 1;
 		}
@@ -3405,7 +5990,7 @@ void peer_mesh_publish_strikes(const unsigned char target[32], int players)
 		size = packet_finish(packet, payload);
 		if (size > 0)
 		{
-			send_out(packet, size);
+			send_reachable(packet, size);
 			if (size <= MESH_MAX_PACKET)
 			{
 				memcpy(mesh.strike_packet, packet, (size_t)size);

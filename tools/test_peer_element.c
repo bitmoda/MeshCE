@@ -108,14 +108,14 @@ static void test_commands(void)
 	expect(tpm_be32(cmd + 6) == 0x00000131u, "parent command code");
 	expect(tpm_be32(cmd + 10) == 0x40000001u, "parent owner");
 	expect(contains(cmd, n, parent_attr, 4), "parent attributes");
-	expect(contains(cmd, n, "OpenCE peer parent v1", 20), "parent label");
+	expect(contains(cmd, n, "MeshCE peer parent v1", 20), "parent label");
 	expect(cmd[n - 6] == 0 && cmd[n - 5] == 0 && cmd[n - 4] == 0 && cmd[n - 3] == 0 && cmd[n - 2] == 0 &&
 		cmd[n - 1] == 0, "parent outside and pcr");
 
 	n = tpm_build_primary(cmd, (int)sizeof(cmd), 1);
 	expect(n > 16 && tpm_be32(cmd + 6) == 0x00000131u, "sign primary");
 	expect(contains(cmd, n, sign_attr, 4), "sign attributes");
-	expect(contains(cmd, n, "OpenCE peer sign v1", 18), "sign label");
+	expect(contains(cmd, n, "MeshCE peer sign v1", 18), "sign label");
 	expect(!contains(cmd, n, parent_attr, 4), "sign is not a storage key");
 
 	memset(seed, 0x5a, sizeof(seed));

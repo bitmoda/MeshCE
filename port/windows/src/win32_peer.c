@@ -3,7 +3,7 @@ WIN32_PEER.C
 
 Windows half of the peer identity seal. The platform crypto provider keeps
 the keys in the TPM for this user. The signing key is P-256 and is named
-opence.peer.v1. The seed is sealed to a second key, opence.peer.v1.seal,
+meshce.peer.v1. The seed is sealed to a second key, meshce.peer.v1.seal,
 with RSA-OAEP and SHA-256. Neither private key is exportable. A copied
 identity file does not open on another machine, or for another Windows user.
 
@@ -24,8 +24,8 @@ program can sign with a key it generated in ordinary memory.
 
 void platform_log(const char *format, ...);
 
-#define PEER_SIGN_KEY L"opence.peer.v1"
-#define PEER_SEAL_KEY L"opence.peer.v1.seal"
+#define PEER_SIGN_KEY L"meshce.peer.v1"
+#define PEER_SEAL_KEY L"meshce.peer.v1.seal"
 
 static NCRYPT_PROV_HANDLE provider;
 static NCRYPT_KEY_HANDLE sign_key;

@@ -127,9 +127,9 @@ static const struct config_setting config_settings[] =
 		"Draw a frame for every display refresh, blending between the game's 30\n"
 		"ticks a second; false keeps the original 30 frames a second." },
 	{ "display.timer_position", _config_integer, "0", NULL, _environment_value, _platform_all,
-		"OpenCE timer position: 0 is top center, 1 bottom center, 2 bottom right." },
+		"MeshCE timer position: 0 is top center, 1 bottom center, 2 bottom right." },
 	{ "display.timer_scale", _config_real, "1.0", NULL, _environment_value, _platform_all,
-		"OpenCE timer size, 0.5 to 1.0. These preferences do not enable the timer." },
+		"MeshCE timer size, 0.5 to 1.0. These preferences do not enable the timer." },
 	{ "display.direct_camera", _config_boolean, "false", "HALO_DIRECT_CAMERA", _environment_value, _platform_desktop,
 		"In first person, point the view where the player aims now instead of\n"
 		"where the last tick left it: the view turns the frame the mouse moves,\n"
@@ -153,8 +153,7 @@ static const struct config_setting config_settings[] =
 		"gems uses shaded Xbox faces; menu_gems uses the menu's button art.\n"
 		"Requires display.high_res_hud." },
 	{ "display.campaign_hud", _config_boolean, "false", "HALO_CAMPAIGN_HUD", _environment_value, _platform_all,
-		"On a Custom Edition map, draw the campaign HUD. The reticle stays\n"
-		"the map's. false draws the map's HUD. The next map loaded uses the choice." },
+		"Kept so an older config still loads. This client plays the original Xbox maps." },
 	{ "display.high_res_text", _config_boolean, "true", "HALO_HIGH_RES_TEXT", _environment_value, _platform_all,
 		"Draw the menus' and HUD's text with the fonts in port/assets/fonts\n"
 		"(Overpass) at the resolution the game draws at, and the menus' titles\n"
@@ -172,10 +171,8 @@ static const struct config_setting config_settings[] =
 	{ "display.menus", _config_string, "\"pc\"", "HALO_MENUS", _environment_value, _platform_all,
 		"The menus: \"pc\" for the PC version's main menu (Quit, and Join Game's\n"
 		"Server Browser), \"xbox\" for the Xbox's." },
-	{ "display.menu_language", _config_string, "\"maps\"", "HALO_MENU_LANGUAGE", _environment_value, _platform_all,
-		"The PC menus' language: \"maps\" for the language of the Custom Edition\n"
-		"whose loc.map is in custom_maps (as that edition shows them; English\n"
-		"without one), \"english\" for English. The port's own lines are English." },
+	{ "display.menu_language", _config_string, "\"english\"", "HALO_MENU_LANGUAGE", _environment_value, _platform_all,
+		"The menus' language is English." },
 	{ "display.player_names", _config_string, "\"all\"", "HALO_PLAYER_NAMES", _environment_value, _platform_all,
 		"In multiplayer, whose names are drawn above their heads: \"all\",\n"
 		"\"allies\", \"enemies\" or \"none\". A teammate's is drawn above the\n"
@@ -260,16 +257,16 @@ static const struct config_setting config_settings[] =
 	{ "audio.dialogue_volume", _config_real, "1.0", NULL, _environment_value, _platform_all,
 		"Unit and scripted dialogue volume, 0.0 to 1.0." },
 	{ "audio.timer_volume", _config_real, "1.0", NULL, _environment_value, _platform_all,
-		"Optional OpenCE timer recordings volume, 0.0 to 1.0." },
+		"Optional MeshCE timer recordings volume, 0.0 to 1.0." },
 	{ "audio.timer_countdown", _config_boolean, "true", NULL, _environment_value, _platform_all,
-		"Play countdown announcements when the host enables OpenCE timer sounds." },
+		"Play countdown announcements when the host enables MeshCE timer sounds." },
 	{ "audio.timer_beeps", _config_boolean, "true", NULL, _environment_value, _platform_all,
-		"Play countdown beeps when the host enables OpenCE timer sounds." },
+		"Play countdown beeps when the host enables MeshCE timer sounds." },
 	{ "audio.timer_minutes", _config_boolean, "true", NULL, _environment_value, _platform_all,
-		"Announce elapsed minutes when the host enables OpenCE timer sounds." },
+		"Announce elapsed minutes when the host enables MeshCE timer sounds." },
 	{ "audio.timer_items", _config_boolean, "false", NULL, _environment_value, _platform_all,
 		"Announce scheduled rockets and powerups on supported maps when the\n"
-		"host enables OpenCE timer sounds. Off preserves the existing timer audio." },
+		"host enables MeshCE timer sounds. Off preserves the existing timer audio." },
 	{ "audio.hardcore_timer_voice", _config_boolean, "true", NULL, _environment_value, _platform_all,
 		"Kept so an old file can move onto display.match_timer. The match clock's\n"
 		"Voice choice plays this machine's countdown." },
@@ -334,8 +331,7 @@ static const struct config_setting config_settings[] =
 	{ "network.block_mouse_aim_assist", _config_boolean, "false", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", _environment_value,
 		_platform_all, "Host: disable mouse aim assist for mouse/keyboard players. The view does not stick, and shots are not pulled onto a target. Controllers and touch keep their own assist." },
 	{ "network.mods_allowed", _config_boolean, "true", "HALO_NET_MODS_ALLOWED", _environment_value, _platform_all,
-		"Host: whether players in this game may play mods. false makes every\n"
-		"machine use the map's own tags. A machine that does not confirm is dropped." },
+		"No longer read. Games use the map's own tags." },
 	{ "input.mouse_aim_assist", _config_boolean, "false", "HALO_MOUSE_AIM_ASSIST", _environment_value, _platform_desktop,
 		"Magnetism while aiming with the mouse, as with a controller: the view\n"
 		"slowed and dragged along by a target. The last of the mouse and the\n"
@@ -478,8 +474,8 @@ static const struct config_setting config_settings[] =
 		"single quotes: 'C:\\Games\\Halo'." },
 	{ "paths.saves", _config_string, "\"\"", "HALO_SAVE_ROOT", _environment_value, _platform_desktop,
 		"Where saved games and profiles go; empty for the usual place\n"
-		"(~/.local/share/opence-mesh, or %APPDATA%\\OpenCE Mesh on Windows, or\n"
-		"~/Library/Application Support/OpenCE Mesh on Mac)." },
+		"(~/.local/share/meshce-mesh, or %APPDATA%\\MeshCE Mesh on Windows, or\n"
+		"~/Library/Application Support/MeshCE Mesh on Mac)." },
 	{ "paths.custom_edition", _config_string, "\"\"", "HALO_CUSTOM_EDITION_ROOT", _environment_value, _platform_desktop,
 		"A Halo Custom Edition install whose maps folder is looked in after the\n"
 		"custom_maps folder for Custom Edition maps and their bitmaps.map,\n"
@@ -622,18 +618,11 @@ static const struct config_setting config_settings[] =
 		"at 8 times their original count; extra vehicle growth uses two thirds\n"
 		"of (multiplier - 1), rounded down. MULTIPLIER in\n"
 		"co-op's Server Setup > Co-op Options writes its choice here." },
-	{ "network.brokers_file", _config_string, "\"brokers.txt\"",
-		"HALO_NET_BROKERS_FILE", _environment_value, _platform_all,
-		"The file of the public MQTT brokers through which the machines of an\n"
-		"invite find each other (its messages are encrypted), beside this file\n"
-		"unless a full path: one host:port on each line, up to 4. Updates\n"
-		"replace brokers.txt: keep a list of your own under another name." },
 	{ "network.masters_file", _config_string, "\"masters.txt\"",
 		"HALO_NET_MASTERS_FILE", _environment_value, _platform_all,
-		"The master servers the server browser asks for dedicated servers,\n"
+		"The master servers the server browser would ask for dedicated servers,\n"
 		"beside this file unless a full path: an https:// address and its\n"
-		"ed25519: key on each line, up to 4. A file that names none leaves\n"
-		"the official master." },
+		"ed25519: key on each line, up to 4. This build asks none." },
 	{ "network.stun_servers", _config_string, "\"stun.l.google.com:19302,stun.cloudflare.com:3478\"",
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"

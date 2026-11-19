@@ -23,9 +23,11 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <thread>
 #include <vector>
 extern "C" {
 #include "host.h"
+#include "host_menu.h"
 }
 #include "../include/halo_metal_abi.h"
 #include "metal_function_cache.h"
@@ -1393,7 +1395,15 @@ fragment float4 present_fragment(PresentVaryings v [[stage_in]],
     float4 value=source.sample(linear_sampler,v.uv,level(0)); value.a=1.0; return value;
 }
 )MSL";
+bool present_paused(void) {
+    if (!host_sdl_game_is_background()) return false;
+    /* A hidden window has no drawable. Pace the frame so the mesh keeps
+       running without spinning the processor. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    return true;
+}
 void present_scaled(id<MTLCommandBuffer> buffer, const Texture &t,uint32_t flags,uint32_t index) {
+    if (present_paused()) return;
     display_link_start();
     apply_display_sync(flags);
     struct PresentHold {
@@ -1551,7 +1561,9 @@ void execute(const HaloMetalPacketView &packet, const Prepared &prepared) {
                 fxaa(buffer,resource(context.textures,c.source),c,prepared.fxaa.at(position)); break;
             }
             case HALO_METAL_PRESENT: {
-                auto c = record<halo_metal_present>(packet,position); auto &t = resource(context.textures,c.source);
+                auto c = record<halo_metal_present>(packet,position);
+                if (present_paused()) break;
+                auto &t = resource(context.textures,c.source);
                 struct PresentHold {
                     bool held;
                     bool armed = false;

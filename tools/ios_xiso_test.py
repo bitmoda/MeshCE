@@ -69,7 +69,7 @@ class ImportTests(unittest.TestCase):
     def patch(self,offset,data):
         with self.image.open('r+b') as f:f.seek(offset);f.write(data)
     def test_supported_releases_and_exact_bytes(self):
-        for build in ('01.10.12.2276','01.01.14.2342'):
+        for build in ('01.10.12.2276','01.01.14.2342','01.08.15.1749'):
             with self.subTest(build=build):
                 self.dest=self.root/build;self.dest.mkdir()
                 payloads=fixture(self.image,build)

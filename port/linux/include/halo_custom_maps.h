@@ -9,6 +9,8 @@
 
 char **native_multiplayer_map_list(char **stock, short stock_count, short *count);
 int native_map_is_custom(char const *map);
+/* The original Xbox maps: the ten campaign levels, ui, and the thirteen multiplayer maps. */
+int native_map_is_retail(char const *map);
 char const *native_map_basename(char const *map);
 int native_map_header_valid(unsigned char const *header, char const *filename);
 /* User-supplied files take precedence over the read-only managed-map overlay. */

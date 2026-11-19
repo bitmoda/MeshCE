@@ -195,10 +195,10 @@ int posix_make_directory(const char *path) { return mkdir(path,0700); }
         if sys.platform == "win32":
             base = self.folder / "appdata"
             self.environ["APPDATA"] = str(base)
-            return base / "Halo OG", base / "OpenCE Mesh"
+            return base / "Halo OG", base / "MeshCE Mesh"
         base = self.folder / "xdg"
         self.environ["XDG_DATA_HOME"] = str(base)
-        return base / "halo-og", base / "opence-mesh"
+        return base / "halo-og", base / "meshce-mesh"
 
     def test_nested_files_are_copied_old_and_existing_new_bytes_preserved(self):
         legacy, destination = self.roots()
@@ -229,19 +229,19 @@ int posix_make_directory(const char *path) { return mkdir(path,0700); }
         if sys.platform != "win32":
             self.environ.pop("XDG_DATA_HOME")
             root, _ = self.run_root()
-            self.assertEqual(root, Path(self.environ["HOME"]) / ".local/share/opence-mesh")
+            self.assertEqual(root, Path(self.environ["HOME"]) / ".local/share/meshce-mesh")
             older = self.folder / "xdg-older"
             self.environ["XDG_DATA_HOME"] = str(older)
-            (older / "opence-mesh/u").mkdir(parents=True)
-            (older / "opence-mesh/u/profile.bin").write_bytes(b"older")
+            (older / "meshce-mesh/u").mkdir(parents=True)
+            (older / "meshce-mesh/u/profile.bin").write_bytes(b"older")
             root, _ = self.run_root()
-            self.assertEqual(root, older / "opence-mesh")
+            self.assertEqual(root, older / "meshce-mesh")
             self.assertEqual((root / "u/profile.bin").read_bytes(), b"older")
             base = self.folder / "windows appdata"
-            (base / "OpenCE Mesh/u").mkdir(parents=True)
-            (base / "OpenCE Mesh/u/profile.bin").write_bytes(b"old")
+            (base / "MeshCE Mesh/u").mkdir(parents=True)
+            (base / "MeshCE Mesh/u/profile.bin").write_bytes(b"old")
             root, _ = self.run_root("windows-selection", APPDATA=str(base))
-            self.assertEqual(root, base / "OpenCE Mesh")
+            self.assertEqual(root, base / "MeshCE Mesh")
             self.assertEqual((root / "u/profile.bin").read_bytes(), b"old")
 
     def test_explicit_config_and_environment_roots_bypass_migration(self):

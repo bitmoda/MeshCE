@@ -1,10 +1,9 @@
 /*
 MASTER_LIST.H
 
-The server browser's master servers (master_list.c). While the browser is
-open, the official master (or the ones in masters.txt) is asked for its
-list, and each dedicated server's host-signed listing is given to the
-browser (p2p_lobby.c).
+The server browser's master servers (master_list.c). This build does not
+ask a master. A dedicated server's host-signed listing would be given to
+the browser (p2p_lobby.c).
 */
 
 #ifndef __HALO_LINUX_MASTER_LIST_H

@@ -1405,7 +1405,8 @@ static void rasterize_in_game_score_draw_line(
 	wchar_t const *string,
 	boolean brighten,
 	real_argb_color *color,
-	long row_index)
+	long row_index,
+	struct player_datum *name_player)
 {
 	rectangle2d bounds = render.camera.window_bounds;
 	short narrow_tab_stops[3];
@@ -1467,6 +1468,22 @@ static void rasterize_in_game_score_draw_line(
 		bounds.y1 = (short)((row_index + 1) * line_height);
 		draw_string_set_draw_mode(font_index, NONE, 0, 0, color);
 		rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, string);
+		/* (a player's row: the Mesh ID, smaller, then the level, after the
+		gamertag at the name's tab) */
+		if (name_player && tab_stops)
+		{
+			rectangle2d name_line;
+			int mesh_machine;
+			int mesh_local;
+
+			name_line.x0 = tab_stops[1];
+			name_line.x1 = (short)(tab_stops[1] + 200);
+			name_line.y0 = bounds.y0;
+			name_line.y1 = bounds.y1;
+			rank_player_install(name_player, &mesh_machine, &mesh_local);
+			rank_draw_name_tail(&name_line, name_player->name, mesh_machine, mesh_local,
+				font_index, color, 1);
+		}
 	}
 
 	draw_string_set_tab_stops(NULL, 0);
@@ -1720,9 +1737,10 @@ enum
 {
 	/* the rows' widths (in the scoreboard's text, before it is scaled):
 	place, name, score, ping (the last as wide as "Ping" or three digits,
-	so that the columns centred are their text centred) */
+	so that the columns centred are their text centred). the name column
+	also holds the Mesh ID, drawn smaller, and the competitive level */
 	SCOREBOARD_PLACE_WIDTH = 55,
-	SCOREBOARD_NAME_WIDTH = 150,
+	SCOREBOARD_NAME_WIDTH = 230,
 	SCOREBOARD_SCORE_WIDTH = 95,
 	SCOREBOARD_PING_WIDTH = 40,
 	SCOREBOARD_COLUMN_WIDTH = SCOREBOARD_PLACE_WIDTH + SCOREBOARD_NAME_WIDTH + SCOREBOARD_SCORE_WIDTH + SCOREBOARD_PING_WIDTH,
@@ -1873,9 +1891,8 @@ static boolean scoreboard_team_columns(
 /* a network game's scoreboard picks players with the mouse
 (halo_scoreboard_pointer_update: a right click frees it): a player's name
 picked opens a menu of what may be done to them, the players' vote to kick
-them (network_votekick.c), muting their voice and text chat on this
-machine (network_voice.c, network_chat.c), and the host's Mute for everyone
-(network_chat.c), Kick and Ban, Ban picked twice */
+them (network_votekick.c) and muting their voice and text chat on this
+machine (network_voice.c, network_chat.c). a host does not kick or ban. */
 enum
 {
 	_scoreboard_item_vote,
@@ -1951,19 +1968,6 @@ static void scoreboard_menu_items(
 				network_voice_machine_muted(player->network_player_data.machine_index) ? L"Unmute voice and chat" :
 					L"Mute voice and chat");
 		}
-	}
-	if (network_votekick_host())
-	{
-		/* (the host's mute of their voice and lines, for every machine:
-		network_chat.c) */
-		offered[_scoreboard_item_host_mute] = TRUE;
-		usprintf(labels[_scoreboard_item_host_mute],
-			network_chat_host_mute_minutes((short)DATUM_INDEX_TO_ABSOLUTE_INDEX(scoreboard_menu.player_index)) ?
-				L"Unmute for everyone" : L"Mute for everyone");
-		offered[_scoreboard_item_kick] = TRUE;
-		offered[_scoreboard_item_ban] = TRUE;
-		usprintf(labels[_scoreboard_item_kick], L"Kick");
-		usprintf(labels[_scoreboard_item_ban], scoreboard_menu.ban_picked ? L"Ban: pick again to ban" : L"Ban");
 	}
 	offered[_scoreboard_item_cancel] = TRUE;
 	usprintf(labels[_scoreboard_item_cancel], L"Cancel");
@@ -2362,47 +2366,11 @@ static void game_engine_rasterize_scoreboard(
 			NUMBEROF(row_string),
 			L"\t%s\t%s\t%s\t%s",
 			campaign ? L"" : get_place_string(entry),
-			rank_scoreboard_name(player->name),
+			player->name,
 			status_string,
 			ping_string);
 		row_string[NUMBEROF(row_string) - 1] = 0;
 		row_color = has_teams ? &team_colors[PIN(player->team_index, 0, 1)] : &color;
-		/* port: a player talking (or muted) in voice chat, its speaker just
-		right of the name */
-		if (network && (network_voice_machine_speaking(player->network_player_data.machine_index) ||
-			network_voice_machine_muted(player->network_player_data.machine_index)))
-		{
-			rectangle2d icon;
-			rectangle2d text;
-			short row_left = (short)(left + column * (SCOREBOARD_COLUMN_WIDTH + SCOREBOARD_COLUMN_GAP));
-			short size;
-			short middle;
-
-			rectangle2d ink;
-			rectangle2d cursor;
-			short name_end;
-
-			/* (after the name's last letter, centred on its capitals: both
-			measured as the row is laid out, the name at its column's tab
-			stop, then scaled as it is drawn, as scoreboard_rectangle has it;
-			within the name's column) */
-			text.x0 = (short)(row_left + SCOREBOARD_PLACE_WIDTH);
-			text.x1 = (short)(text.x0 + SCOREBOARD_NAME_WIDTH);
-			text.y0 = (short)(top + (2 + row) * line_height);
-			text.y1 = (short)(text.y0 + line_height);
-			draw_string_set_draw_mode(font_index, NONE, 0, 0, row_color);
-			draw_unicode_string_compute_bounds(&text, player->name, &ink, &cursor);
-			middle = (short)(top + (draw_unicode_string_capital_middle(&text, player->name) - top) * SCOREBOARD_SCALE);
-			scoreboard_rectangle(&icon, bounds.x0, top, line_height, text.x0, SCOREBOARD_NAME_WIDTH, 2 + row, 1);
-			size = (short)((icon.y1 - icon.y0) * 2 / 3);
-			name_end = (short)(bounds.x0 + (MAX(ink.x1, text.x0) - bounds.x0) * SCOREBOARD_SCALE);
-			icon.x0 = (short)MIN(name_end + 4, icon.x1 - size);
-			icon.x1 = (short)(icon.x0 + size);
-			icon.y0 = (short)(middle - size / 2);
-			icon.y1 = (short)(icon.y0 + size);
-			network_voice_draw_icon(&icon, network_voice_machine_muted(player->network_player_data.machine_index),
-				alpha);
-		}
 		/* port: another machine's player, picked with the pointer: lit
 		under it (not under the menu), and its menu opened when clicked */
 		if (pointer_state > 0 && player->local_player_index == NONE)
@@ -2437,6 +2405,55 @@ static void game_engine_rasterize_scoreboard(
 			top,
 			(short)(left + column * (SCOREBOARD_COLUMN_WIDTH + SCOREBOARD_COLUMN_GAP)),
 			TRUE);
+		{
+			rectangle2d name_line;
+			real_argb_color shown;
+			short row_left = (short)(left + column * (SCOREBOARD_COLUMN_WIDTH + SCOREBOARD_COLUMN_GAP));
+			short layout_end;
+			int mesh_machine;
+			int mesh_local;
+
+			/* (the gamertag at its column's tab. the Mesh ID follows it,
+			smaller, then the competitive level at the gamertag's size) */
+			name_line.x0 = (short)(row_left + SCOREBOARD_PLACE_WIDTH);
+			name_line.x1 = (short)(name_line.x0 + SCOREBOARD_NAME_WIDTH);
+			name_line.y0 = (short)(top + (2 + row) * line_height);
+			name_line.y1 = (short)(name_line.y0 + line_height);
+			shown = *row_color;
+			if (player_index == entry->player_index)
+			{
+				shown.red = MIN(shown.red + 0.4f, 1.0f);
+				shown.green = MIN(shown.green + 0.4f, 1.0f);
+				shown.blue = MIN(shown.blue + 0.4f, 1.0f);
+			}
+			rank_player_install(player, &mesh_machine, &mesh_local);
+			draw_string_set_draw_mode(font_index, NONE, 0, 0, &shown);
+			layout_end = rank_draw_name_tail(&name_line, player->name, mesh_machine, mesh_local,
+				font_index, &shown, 1);
+			/* port: a player talking (or muted) in voice chat, its speaker just
+			right of the name, the Mesh ID, and the level */
+			if (network && (network_voice_machine_speaking(player->network_player_data.machine_index) ||
+				network_voice_machine_muted(player->network_player_data.machine_index)))
+			{
+				rectangle2d icon;
+				short size;
+				short middle;
+				short name_end;
+
+				middle = (short)(top + (draw_unicode_string_capital_middle(&name_line, player->name) - top) *
+					SCOREBOARD_SCALE);
+				scoreboard_rectangle(&icon, bounds.x0, top, line_height, name_line.x0, SCOREBOARD_NAME_WIDTH,
+					2 + row, 1);
+				size = (short)((icon.y1 - icon.y0) * 2 / 3);
+				name_end = (short)(bounds.x0 + ((real)layout_end - bounds.x0) * SCOREBOARD_SCALE);
+				icon.x0 = (short)MIN(name_end + 4, icon.x1 - size);
+				icon.x1 = (short)(icon.x0 + size);
+				icon.y0 = (short)(middle - size / 2);
+				icon.y1 = (short)(icon.y0 + size);
+				network_voice_draw_icon(&icon, network_voice_machine_muted(player->network_player_data.machine_index),
+					alpha);
+			}
+		}
 	}
 	/* (where the scroll is, and how to move it) */
 	if (total > page)
@@ -2561,7 +2578,7 @@ static void game_engine_rasterize_in_game_score(
 	color.red = 0.7f;
 	color.green = 0.7f;
 	color.blue = 0.7f;
-	rasterize_in_game_score_draw_line(title_string, FALSE, &color, 0);
+	rasterize_in_game_score_draw_line(title_string, FALSE, &color, 0, NULL);
 
 	color.red = 0.5f;
 	color.green = 0.5f;
@@ -2583,7 +2600,7 @@ static void game_engine_rasterize_in_game_score(
 	game_engine->format_score_name(score_string);
 	usnprintf(row_string, NUMBEROF(row_string), L"\t%s\t%s\t%s", column_name, score_name, score_string);
 	row_string[NUMBEROF(row_string) - 1] = 0;
-	rasterize_in_game_score_draw_line(row_string, FALSE, &color, 1);
+	rasterize_in_game_score_draw_line(row_string, FALSE, &color, 1, NULL);
 
 	for (entry_index = 0; entry_index < entry_count; entry_index++)
 	{
@@ -2644,7 +2661,7 @@ static void game_engine_rasterize_in_game_score(
 				NUMBEROF(row_string),
 				L"\t%s\t%s\t%s",
 				place_string,
-				rank_scoreboard_name(player->name),
+				player->name,
 				status_string);
 			row_string[NUMBEROF(row_string) - 1] = 0;
 
@@ -2657,7 +2674,8 @@ static void game_engine_rasterize_in_game_score(
 				row_string,
 				is_current_player,
 				row_color,
-				entry_index + 2);
+				entry_index + 2,
+				player);
 		}
 	}
 
@@ -2873,9 +2891,27 @@ void game_engine_post_rasterize_post_game(
 			draw_string_set_color(
 				&team_colors[PIN(team_index, 0, 1)]);
 		}
-		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", rank_scoreboard_name(player->name));
+		usnprintf(row_string, NUMBEROF(row_string), L" \t \t%s", player->name);
 		row_string[NUMBEROF(row_string) - 1] = 0;
 		drawline(row_string, draw_row, 0);
+		{
+			rectangle2d name_line;
+			real_argb_color shown;
+			int mesh_machine;
+			int mesh_local;
+
+			/* (drawline's row: 18 tall, 8 of space. the name starts at the
+			second tab. the Mesh ID follows, smaller, then the level) */
+			name_line.x0 = tab_stops[1];
+			name_line.x1 = (short)(tab_stops[1] + 220);
+			name_line.y0 = (short)(draw_row * 18);
+			name_line.y1 = (short)((draw_row + 1) * 18 + 8);
+			draw_string_get_color(&shown);
+			rank_player_install(player, &mesh_machine, &mesh_local);
+			draw_string_set_draw_mode(font_index, NONE, 0, 0, &shown);
+			rank_draw_name_tail(&name_line, player->name, mesh_machine, mesh_local,
+				font_index, &shown, 1);
+		}
 		draw_string_set_color(&winner_color);
 
 		if (!postgame_statistic_get_rating(player_index, _postgame_statistic_score, FALSE))
@@ -2944,6 +2980,10 @@ void game_engine_post_rasterize_post_game(
 		server = global_network_game_server_get();
 		if (server)
 		{
+			/* Matchmaking already chose the game. This report does not
+			offer the host another one. */
+			if (matchmaking_game_port())
+				return;
 			bounds.x0 = 380;
 			string_list_index =
 				tag_loaded('ustr', "ui\\multiplayer_game_text");
@@ -3870,7 +3910,8 @@ real get_blink_alpha(
 
 void game_engine_rasterize_message(
 	wchar_t const *message,
-	real alpha)
+	real alpha,
+	struct player_datum *mesh_player)
 {
 	rectangle2d bounds;
 	real_argb_color color;
@@ -3908,6 +3949,14 @@ void game_engine_rasterize_message(
 	draw_string_set_draw_mode(font_index, NONE, 2, 8, &color);
 	draw_string_set_color(&color);
 	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, message);
+	if (mesh_player)
+	{
+		int mesh_machine;
+		int mesh_local;
+
+		rank_player_install(mesh_player, &mesh_machine, &mesh_local);
+		rank_draw_name_tail(&bounds, message, mesh_machine, mesh_local, font_index, &color, 0);
+	}
 	draw_string_set_format(NONE, 0, 0);
 	draw_string_set_tab_stops(NULL, 0);
 
@@ -3998,6 +4047,13 @@ static void game_engine_rasterize_voice_speakers(
 		icon.y1 = (short)(icon.y0 + line_height * VOICE_SPEAKERS_SCALE);
 		network_voice_draw_icon(&icon, FALSE, 1.0f);
 		rasterizer_draw_unicode_string(&text, NULL, NULL, 0, player->name);
+		{
+			int mesh_machine;
+			int mesh_local;
+
+			rank_player_install(player, &mesh_machine, &mesh_local);
+			rank_draw_name_tail(&text, player->name, mesh_machine, mesh_local, font_index, &color, 0);
+		}
 		row++;
 	}
 	rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
@@ -4839,6 +4895,8 @@ static void game_engine_update_vehicle_respawn(
 	}
 }
 
+static void matchmaking_carnage_advance(boolean leave, struct network_game_server *server);
+
 void game_engine_update(
 	void)
 {
@@ -4943,7 +5001,14 @@ void game_engine_update(
 
 		case game_engine_mode_postgame_rasterize_delay:
 		case game_engine_mode_postgame_rasterize:
+		{
+			struct network_game_server *server;
+
+			server = global_network_game_server_get();
+			if (server && matchmaking_game_port())
+				matchmaking_carnage_advance(FALSE, server);
 			break;
+		}
 
 		default:
 			match_assert(
@@ -5241,6 +5306,91 @@ void game_engine_player_killed(
 	return;
 }
 
+/* a matchmaking carnage report stays up for ten seconds of real time, then
+the lobby returns. a button already held when it appears does not skip it. */
+static unsigned long matchmaking_carnage_deadline;
+static boolean matchmaking_carnage_done = FALSE;
+static boolean matchmaking_carnage_rematch;
+static boolean matchmaking_carnage_buttons_ready;
+static boolean matchmaking_carnage_hold_leave;
+static boolean matchmaking_carnage_hold_abort;
+
+static void matchmaking_carnage_reset(
+	void)
+{
+	matchmaking_carnage_deadline = 0;
+	matchmaking_carnage_done = FALSE;
+	matchmaking_carnage_rematch = FALSE;
+	matchmaking_carnage_buttons_ready = FALSE;
+	matchmaking_carnage_hold_leave = FALSE;
+	matchmaking_carnage_hold_abort = FALSE;
+}
+
+static int matchmaking_carnage_humans(
+	void)
+{
+	/* who is still in the network game. a player who already left is not
+	part of the count the next lobby waits for. */
+	return network_game_server_seated_human_count();
+}
+
+/* the score screen is the rasterize delay and the rasterize after it.
+ten seconds of real time covers both, whether or not the match clock is moving. */
+static void matchmaking_carnage_advance(
+	boolean leave,
+	struct network_game_server *server)
+{
+	unsigned long now;
+
+	if (!server || matchmaking_carnage_done || !matchmaking_game_port())
+		return;
+	now = system_milliseconds();
+	if (!matchmaking_carnage_deadline)
+	{
+		matchmaking_carnage_deadline = now + 10000UL;
+		if (!matchmaking_carnage_deadline)
+			matchmaking_carnage_deadline = 1;
+	}
+	if (leave || (long)(now - matchmaking_carnage_deadline) >= 0)
+	{
+		/* one new match id. a failed return to the lobby tries again next
+		frame instead of picking another map. */
+		if (!matchmaking_carnage_rematch)
+		{
+			if (!matchmaking_begin_rematch(matchmaking_carnage_humans()))
+				return;
+			matchmaking_carnage_rematch = TRUE;
+		}
+		if (network_game_server_reset_to_pregame(server))
+			matchmaking_carnage_done = TRUE;
+	}
+}
+
+/* a press after the report is up. the buttons held as the match ended stay held. */
+static void matchmaking_carnage_buttons(
+	boolean *leave,
+	boolean *abort_game)
+{
+	boolean leave_down;
+	boolean abort_down;
+
+	leave_down = test_any_gamepad_button(0) || test_any_gamepad_button(12);
+	abort_down = test_any_gamepad_button(1) || test_any_gamepad_button(13);
+	if (!matchmaking_carnage_buttons_ready)
+	{
+		matchmaking_carnage_buttons_ready = TRUE;
+		matchmaking_carnage_hold_leave = leave_down;
+		matchmaking_carnage_hold_abort = abort_down;
+		*leave = FALSE;
+		*abort_game = FALSE;
+		return;
+	}
+	*leave = leave_down && !matchmaking_carnage_hold_leave;
+	*abort_game = abort_down && !matchmaking_carnage_hold_abort;
+	matchmaking_carnage_hold_leave = leave_down;
+	matchmaking_carnage_hold_abort = abort_down;
+}
+
 void game_engine_update_non_deterministic(
 	real delta_seconds)
 {
@@ -5249,29 +5399,59 @@ void game_engine_update_non_deterministic(
 		switch (game_engine_globals.postgame_state)
 		{
 		case game_engine_mode_postgame_rasterize_delay:
+		{
+			struct network_game_server *server;
+
 			rumble_clear_all_now();
 			game_engine_globals.postgame_timer -= delta_seconds;
-			if (game_engine_globals.postgame_timer <= 0.0f)
+			server = global_network_game_server_get();
+			if (server && matchmaking_game_port())
+			{
+				boolean leave;
+				boolean abort_game;
+
+				/* either button returns to the lobby. leaving the match here
+				would drop the server and the players in it. */
+				matchmaking_carnage_buttons(&leave, &abort_game);
+				matchmaking_carnage_advance(leave || abort_game ? TRUE : FALSE, server);
+			}
+			if (!matchmaking_carnage_done &&
+				game_engine_globals.postgame_state == game_engine_mode_postgame_rasterize_delay &&
+				game_engine_globals.postgame_timer <= 0.0f)
 				game_engine_globals.postgame_state = game_engine_mode_postgame_rasterize;
 			break;
+		}
 
 		case game_engine_mode_postgame_rasterize:
+		{
+			boolean leave;
+			boolean abort_game;
+			struct network_game_server *server;
+
 			rumble_clear_all_now();
 			game_engine_globals.postgame_progress += delta_seconds;
 			if (game_engine_globals.postgame_progress > 1.0f)
 				game_engine_globals.postgame_progress = 1.0f;
 
-			if (test_any_gamepad_button(0) || test_any_gamepad_button(12))
+			leave = test_any_gamepad_button(0) || test_any_gamepad_button(12);
+			abort_game = test_any_gamepad_button(1) || test_any_gamepad_button(13);
+			server = global_network_game_server_get();
+			if (matchmaking_game_port())
 			{
-				if (global_network_game_server_get())
-				network_game_server_reset_to_pregame(
-					global_network_game_server_get());
+				/* the host's button returns everyone. another player stays
+				for that, including a button still held as the report appears. */
+				if (server)
+				{
+					matchmaking_carnage_buttons(&leave, &abort_game);
+					matchmaking_carnage_advance(leave || abort_game ? TRUE : FALSE, server);
+				}
 			}
-			else if (test_any_gamepad_button(1) || test_any_gamepad_button(13))
-			{
+			else if (abort_game)
 				network_game_abort();
-			}
+			else if (leave && server)
+				network_game_server_reset_to_pregame(server);
 			break;
+		}
 		}
 	}
 
@@ -5660,6 +5840,37 @@ static boolean lan_match_only_bots_left(void)
 	return lan_match_had_a_player && humans == 0 && bots > 0;
 }
 
+/* a matchmaking game keeps going while two humans are still in it. one human
+left, because the others have gone, ends it. */
+static boolean matchmaking_one_human_left(void)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long humans;
+	long departed;
+
+	if (!matchmaking_game_port())
+		return FALSE;
+	if (!player_data || !player_data->valid)
+		return FALSE;
+
+	humans = 0;
+	departed = 0;
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		if (lan_player_is_bot(player))
+			continue;
+		if (player->quit_out_of_game || player->quit_out_of_game_time != NONE)
+		{
+			departed++;
+			continue;
+		}
+		humans++;
+	}
+	return departed > 0 && humans <= 1;
+}
+
 boolean game_engine_should_end_game(
 	void)
 {
@@ -5668,6 +5879,8 @@ boolean game_engine_should_end_game(
 	if (game_engine && !multiple_teams_alive())
 		should_end_game = TRUE;
 	if (game_engine && lan_match_only_bots_left())
+		should_end_game = TRUE;
+	if (game_engine && matchmaking_one_human_left())
 		should_end_game = TRUE;
 	/* port: the gametype's time limit (game_variant_options) */
 	if (game_engine && game_variant_options_get()->time_limit > 0 &&
@@ -5773,6 +5986,7 @@ void game_engine_switch_to_postgame(
 		{
 			game_engine_globals.postgame_state = game_engine_mode_postgame_delay;
 			game_engine_globals.postgame_timer = 7.0f;
+			matchmaking_carnage_reset();
 		}
 		else
 		{
@@ -5803,6 +6017,7 @@ void game_engine_end_game(
 	{
 		game_engine_globals.postgame_state = game_engine_mode_postgame_delay;
 		game_engine_globals.postgame_timer = 7.0f;
+		matchmaking_carnage_reset();
 		game_engine_play_multiplayer_sound(_multiplayer_sound_game_over);
 		ui_widgets_close_all();
 	}
@@ -8489,7 +8704,7 @@ static void internal_rasterize_target_name(
 		ustrncpy(target_name, target_player->name, NUMBEROF(target_name) - 1);
 		target_name[NUMBEROF(target_name) - 1] = 0;
 		alpha = linear_to_non_linear_alpha(hold_time * 0.1f) * 0.5f;
-		game_engine_rasterize_message(target_name, alpha);
+		game_engine_rasterize_message(target_name, alpha, target_player);
 	}
 
 	return;
@@ -9462,7 +9677,7 @@ boolean game_engine_should_spawn_player(
 	{
 		struct player_datum *player = player_get(player_index);
 
-		if (player->quit_out_of_game == TRUE)
+		if (player->quit_out_of_game == TRUE || player->quit_out_of_game_time != NONE)
 		{
 			should_spawn = FALSE;
 		}

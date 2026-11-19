@@ -1049,6 +1049,9 @@ boolean network_game_client_switch_to_pregame(
 		client->join_in_progress = TRUE;
 		client->connection_silent = FALSE;
 		client->state = _network_game_client_state_pregame;
+		/* the round that just ended left its last number here. the next
+		countdown arrives on its own. */
+		client->seconds_to_game_start = NONE;
 		network_game_client_late_join_time = 0;
 		network_game_client_late_join_clock_pending = FALSE;
 		/* port: a start put off is not this game's */
@@ -1828,12 +1831,74 @@ static void network_game_client_assign_bot_view(
 	}
 }
 
+struct network_game_client_quit_note
+{
+	int used;
+	long player_index;
+	long tick;
+};
+
+static struct network_game_client_quit_note network_game_client_quit_notes[16];
+
+static void network_game_client_clear_quit_ticks(
+	void)
+{
+	csmemset(network_game_client_quit_notes, 0, sizeof(network_game_client_quit_notes));
+}
+
+static void network_game_client_note_quit(
+	long player_index,
+	long tick)
+{
+	int index;
+	int open;
+
+	if (player_index == NONE || tick <= 0)
+		return;
+	open = -1;
+	for (index = 0; index < (int)NUMBEROF(network_game_client_quit_notes); index++)
+	{
+		if (!network_game_client_quit_notes[index].used)
+		{
+			if (open < 0)
+				open = index;
+			continue;
+		}
+		if (network_game_client_quit_notes[index].player_index == player_index)
+		{
+			network_game_client_quit_notes[index].tick = tick;
+			return;
+		}
+	}
+	if (open < 0)
+		return;
+	network_game_client_quit_notes[open].used = 1;
+	network_game_client_quit_notes[open].player_index = player_index;
+	network_game_client_quit_notes[open].tick = tick;
+}
+
+long network_game_client_quit_tick(
+	long player_index)
+{
+	int index;
+
+	for (index = 0; index < (int)NUMBEROF(network_game_client_quit_notes); index++)
+	{
+		if (network_game_client_quit_notes[index].used &&
+			network_game_client_quit_notes[index].player_index == player_index)
+			return network_game_client_quit_notes[index].tick;
+	}
+	return NONE;
+}
+
 boolean network_game_client_game_has_started(
 	struct network_game_client *client)
 {
 	/* (the host's time came with the start: the loading below is counted) */
 	unsigned long loading_started = system_milliseconds();
 
+	/* a new match. quit ticks from the last one must not be reused. */
+	network_game_client_clear_quit_ticks();
 	match_assert(
 		"c:\\halo\\SOURCE\\networking\\network_client_manager.c",
 		0x3B0,
@@ -1934,6 +1999,28 @@ boolean network_game_client_game_has_started(
 					network_game_client_late_join_clock_pending =
 						game_connection() == _game_connection_network_client;
 					game_initial_pulse();
+					/* The lobby already copied the map, so the copy's loading
+					   screen never runs. A client draws the opening sweep
+					   before this returns. The frames after it would step
+					   past a sweep that had not been shown. The host draws
+					   the same sweep from its own frames. A game joined in
+					   progress did not hold. */
+					if (game_connection() == _game_connection_network_client &&
+						hardcore_rules_opening_hold())
+					{
+						unsigned long shown_at;
+
+						shown_at = system_milliseconds();
+						while (hardcore_rules_opening_hold() &&
+							system_milliseconds() - shown_at < hardcore_rules_opening_sweep_ms())
+						{
+							if (!network_connection_idle(client->connection, 15000, NULL))
+								break;
+							main_pregame_render();
+							main_rasterizer_throttle();
+							main_present_frame();
+						}
+					}
 				}
 				else
 				{
@@ -1987,10 +2074,12 @@ boolean network_game_client_remove_player(
 	{
 		if (player_index && player_index != NONE)
 		{
-			struct player_datum *player_datum = player_get(player_index);
+			struct player_datum *player_datum = player_try_and_get(player_index);
 
 			if (reason != NONE)
 			{
+				/* the host's tick, kept before this clock moves it */
+				network_game_client_note_quit(player_index, reason);
 				/* (a quit time this clock has passed would never be reached,
 				game.c) */
 				reason = MAX(reason, game_time_get() + 1);
@@ -2000,7 +2089,11 @@ boolean network_game_client_remove_player(
 					player_index,
 					reason,
 					game_time_get());
-				player_datum->quit_out_of_game_time = reason;
+				/* a player already gone is not written: that ends the host */
+				if (player_datum)
+					player_datum->quit_out_of_game_time = reason;
+				else
+					error(_error_silent, "quit for player %x had no player", player_index);
 				/* (and is no longer its machine's: a machine that joins the
 				game in progress at its index fills the list afresh,
 				players.c) */
@@ -2057,6 +2150,7 @@ void network_game_client_accepted_into_game(
 		client->game.machines[message_packet->machine_index].machine_index =
 			(char)message_packet->machine_index;
 		client->state = _network_game_client_state_pregame;
+		matchmaking_clear_rejoin();
 
 		network_game_set_random_seed(message_packet->random_seed);
 		network_event(
@@ -2271,6 +2365,7 @@ boolean network_game_client_initiate_join_game(
 	else
 	{
 		client->join_in_progress = FALSE;
+		matchmaking_clear_rejoin();
 		display_error_when_main_menu_loaded(7);
 		network_event(
 			"failed attempt to initiate a connection to game @ %s",
@@ -2539,6 +2634,18 @@ void network_game_client_rejected_by_game(
 		"unable to join game: reason= #%d/%s",
 		rejection_code,
 		reason);
+	/* a find-game join that landed on a full lobby goes back to that search.
+	the main menu opens the playlist again and presses Find Game. */
+	if ((rejection_code == _rejection_code_game_is_full ||
+			rejection_code == _rejection_code_game_is_closed) &&
+		matchmaking_rejoin_pending())
+	{
+		matchmaking_mark_resume();
+		network_game_abort();
+		network_game_client_reset(client, TRUE);
+		return;
+	}
+	matchmaking_clear_rejoin();
 	/* port: the join went to the pregame screen at once (and a machine
 	refused a game in progress, network_game_server_refuse_late_joiner, is in
 	it): with no game behind it, it is left for the main menu, which says
@@ -3185,10 +3292,18 @@ static boolean network_game_client_idle_pregame(
 			{
 				network_event("network_game_client_process_incoming_messages() failed in network_game_client_idle_pregame()");
 			}
+			/* port: mesh ids while the lobby is up (network_peer.c). the
+			match clock does not move here, so the in-game send does not. */
+			else if (client->state == _network_game_client_state_pregame)
+			{
+				void network_peer_lobby_tick(void);
+
+				network_peer_lobby_tick();
+			}
 			/* port: a start put off while the map was downloaded (map
 			sharing), once the download is over: the game loaded if the map
 			is there (a failed download leaves the game: map_share.c) */
-			else if (network_game_client_start_pending && client->state == _network_game_client_state_pregame &&
+			if (success && network_game_client_start_pending && client->state == _network_game_client_state_pregame &&
 				!map_share_downloading(client->game.map.name))
 			{
 				network_game_client_start_pending = FALSE;

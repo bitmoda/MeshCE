@@ -30,23 +30,6 @@ static int create_directories(const char *path) {
         }
     return mkdir(buffer, 0755) && errno != EEXIST ? -1 : 0;
 }
-/* The peer mesh finds players. The saves folder gets an empty list so a
-later read cannot fall back to the public brokers. */
-static void host_install_brokers(const char *resources, const char *saves) {
-    char destination_path[4096];
-    static const char note[] =
-        "# This client finds players on its own peer mesh.\n"
-        "# It does not use the public brokers.\n";
-    FILE *destination;
-
-    (void)resources;
-    snprintf(destination_path, sizeof(destination_path), "%s/brokers.txt", saves);
-    destination = fopen(destination_path, "wb");
-    if (!destination)
-        return;
-    fwrite(note, 1, sizeof(note) - 1, destination);
-    fclose(destination);
-}
 void host_logf(int priority, const char *format, ...) {
     (void)priority;
     va_list a;
@@ -172,13 +155,12 @@ int main(int argc, char **argv) {
     if (!home)
         host_fatal("HOME is not set");
     snprintf(default_saves, sizeof(default_saves),
-             "%s/Library/Application Support/OpenCE Mesh", home);
+             "%s/Library/Application Support/MeshCE Mesh", home);
     const char *saves = getenv("HALO_SAVE_ROOT");
     if (!saves)
         saves = !image_argument ? default_saves : "build/macos/saves";
     if (create_directories(saves) || !realpath(saves, save_root))
         host_fatal("Cannot open saves folder: %s", saves);
-    host_install_brokers(resources, save_root);
     if (!image_argument) host_menu_initialize_application();
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
@@ -260,6 +242,7 @@ int main(int argc, char **argv) {
         host_fatal("Cannot allocate main stack");
     mprotect(stack, HALO_MACOS_PAGE, PROT_NONE);
     host_logf(HOST_LOG_INFO, "Halo ARM64 starting: data %s; saves %s", data_root, save_root);
+    host_menu_allow_local_network();
     if (!image_argument) host_menu_begin_game();
     macos_enter_guest_stack(stack + stack_size + HALO_MACOS_PAGE, boot);
 }

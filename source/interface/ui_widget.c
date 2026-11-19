@@ -665,6 +665,7 @@ struct widget_instance;
 #include "networking/network_connection.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_server_manager.h"
+#include "../../port/linux/src/matchmaking.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "rasterizer/rasterizer.h"
 #include "saved games/player_profile.h"
@@ -4976,6 +4977,19 @@ void network_game_reset_to_pregame_ui(
 			}
 		}
 	}
+	else if (matchmaking_game_port())
+	{
+		/* the host and everyone else come back to the matchmaking lobby.
+		the lobby's own open unpauses the countdown. */
+		if (global_network_game_server_get())
+			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
+		if (!ui_widget_load_by_name_or_tag(
+			pc_menus_screen("ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen"),
+			NONE, NULL, NONE, NONE, NONE, NONE))
+		{
+			error(_error_silent, "failed to load the matchmaking lobby");
+		}
+	}
 	else
 	{
 		if (global_network_game_server_get())
@@ -5207,6 +5221,17 @@ static void perform_filesystem_initialization(
 	}
 
 	return;
+}
+
+/* a full find-game lobby sends the player back here. the menu widget is up,
+and the player queues have been built, so the same playlist can search again. */
+void main_menu_resume_search(
+	void)
+{
+	extern void menu_matchmaking_resume(struct widget_instance *screen);
+
+	if (widget_globals.active_widgets[0])
+		menu_matchmaking_resume(widget_globals.active_widgets[0]);
 }
 
 void main_screen_shell_load(

@@ -12,6 +12,12 @@ extern void halo_update_discard_shader_caches(const char *save_root);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #ifndef HALO_MAC_UPDATE_BUILD
 #define HALO_MAC_UPDATE_BUILD 0
@@ -63,7 +69,7 @@ static HaloMenu *menu;
 
 static void showError(NSError *error) {
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"OpenCE could not use that setting";
+    alert.messageText = @"MeshCE could not use that setting";
     alert.informativeText = error.localizedDescription ?: @"Please try again.";
     if (menu.gameRunning) {
         [menu showSettings:nil];
@@ -132,10 +138,10 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     self.importing = YES;
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 150)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    window.title = @"Preparing OpenCE Data";
+    window.title = @"Preparing MeshCE Data";
     window.releasedWhenClosed = NO;
-    label(window.contentView, @"Copying your saved data into the OpenCE folder in Application Support.", NSMakeRect(24, 103, 472, 25), NO);
-    NSTextField *status = label(window.contentView, @"Your original files and existing OpenCE files stay in place.", NSMakeRect(24, 73, 472, 22), YES);
+    label(window.contentView, @"Copying your saved data into the MeshCE folder in Application Support.", NSMakeRect(24, 103, 472, 25), NO);
+    NSTextField *status = label(window.contentView, @"Your original files and existing MeshCE files stay in place.", NSMakeRect(24, 73, 472, 22), YES);
     NSProgressIndicator *bar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(24, 35, 472, 18)];
     bar.style = NSProgressIndicatorStyleBar;
     bar.indeterminate = YES;
@@ -157,8 +163,8 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     self.importing = NO;
     if (!success) {
         NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"OpenCE could not finish copying your saved data";
-        alert.informativeText = [NSString stringWithFormat:@"%@\n\nThe older Application Support folder and existing OpenCE files were preserved. The game will close so you can fix the issue and retry; it will not start with empty settings.", migrationError.localizedDescription ?: @"The copy could not finish."];
+        alert.messageText = @"MeshCE could not finish copying your saved data";
+        alert.informativeText = [NSString stringWithFormat:@"%@\n\nThe older Application Support folder and existing MeshCE files were preserved. The game will close so you can fix the issue and retry; it will not start with empty settings.", migrationError.localizedDescription ?: @"The copy could not finish."];
         [alert addButtonWithTitle:@"Quit and Retry Later"];
         [alert runModal];
     }
@@ -188,16 +194,17 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     NSImage *image = [[NSImage alloc] initWithContentsOfURL:icon];
     image.size = NSMakeSize(18, 18);
     image.template = YES;
-    self.status.button.image = image ?: [NSImage imageWithSystemSymbolName:@"gamecontroller" accessibilityDescription:@"OpenCE"];
-    self.status.button.toolTip = @"OpenCE";
-    self.status.button.accessibilityLabel = @"OpenCE";
-    NSMenu *statusMenu = [[NSMenu alloc] initWithTitle:@"OpenCE"];
+    self.status.button.image = image ?: [NSImage imageWithSystemSymbolName:@"gamecontroller" accessibilityDescription:@"MeshCE"];
+    self.status.button.toolTip = @"MeshCE";
+    self.status.button.accessibilityLabel = @"MeshCE";
+    NSMenu *statusMenu = [[NSMenu alloc] initWithTitle:@"MeshCE"];
     statusMenu.delegate = self;
-    NSMenuItem *title = [[NSMenuItem alloc] initWithTitle:@"OpenCE" action:nil keyEquivalent:@""];
+    NSMenuItem *title = [[NSMenuItem alloc] initWithTitle:@"MeshCE" action:nil keyEquivalent:@""];
     title.enabled = NO;
     [statusMenu addItem:title];
     [statusMenu addItem:NSMenuItem.separatorItem];
     item(statusMenu, @"Show Game", @selector(showGame:), @"");
+    item(statusMenu, @"Hide Game", @selector(hideGame:), @"h");
     item(statusMenu, @"Enter Full Screen", @selector(toggleFullscreen:), @"");
     item(statusMenu, @"Settings…", @selector(showSettings:), @",");
     [statusMenu addItem:NSMenuItem.separatorItem];
@@ -207,18 +214,18 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     item(statusMenu, @"Edit Controls and Advanced Settings…", @selector(openConfig:), @"");
     [statusMenu addItem:NSMenuItem.separatorItem];
     item(statusMenu, @"Check for Updates…", @selector(checkUpdates:), @"");
-    NSMenuItem *statusQuit = item(statusMenu, @"Quit OpenCE", @selector(terminate:), @"q");
+    NSMenuItem *statusQuit = item(statusMenu, @"Quit MeshCE", @selector(terminate:), @"q");
     statusQuit.target = NSApp;
     self.status.menu = statusMenu;
 
     NSMenu *main = [[NSMenu alloc] initWithTitle:@"Main"];
-    NSMenuItem *app = [[NSMenuItem alloc] initWithTitle:@"OpenCE" action:nil keyEquivalent:@""];
-    NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"OpenCE"];
-    item(appMenu, @"About OpenCE", @selector(about:), @"");
+    NSMenuItem *app = [[NSMenuItem alloc] initWithTitle:@"MeshCE" action:nil keyEquivalent:@""];
+    NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"MeshCE"];
+    item(appMenu, @"About MeshCE", @selector(about:), @"");
     item(appMenu, @"Settings…", @selector(showSettings:), @",");
     item(appMenu, @"Check for Updates…", @selector(checkUpdates:), @"");
     [appMenu addItem:NSMenuItem.separatorItem];
-    NSMenuItem *appQuit = item(appMenu, @"Quit OpenCE", @selector(terminate:), @"q");
+    NSMenuItem *appQuit = item(appMenu, @"Quit MeshCE", @selector(terminate:), @"q");
     appQuit.target = NSApp;
     app.submenu = appMenu;
     [main addItem:app];
@@ -228,6 +235,7 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     NSMenuItem *fullscreen = item(viewMenu, @"Enter Full Screen", @selector(toggleFullscreen:), @"f");
     fullscreen.keyEquivalentModifierMask = NSEventModifierFlagControl | NSEventModifierFlagCommand;
     item(viewMenu, @"Show Game", @selector(showGame:), @"");
+    item(viewMenu, @"Hide Game", @selector(hideGame:), @"h");
     view.submenu = viewMenu;
     [main addItem:view];
     NSApp.mainMenu = main;
@@ -235,17 +243,22 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
 - (void)menuWillOpen:(NSMenu *)sender { (void)sender; host_sdl_release_mouse(); }
 - (void)menuNeedsUpdate:(NSMenu *)sender {
     for (NSMenuItem *entry in sender.itemArray) {
+        if (!entry.action && [entry.title hasPrefix:@"MeshCE"])
+            entry.title = host_sdl_game_is_background() ? @"MeshCE is running" : @"MeshCE";
         if (entry.action == @selector(toggleFullscreen:))
             entry.title = host_sdl_is_fullscreen() ? @"Exit Full Screen" : @"Enter Full Screen";
         if (entry.action == @selector(checkUpdates:))
             entry.title = self.pendingInstall ? @"Update Ready — Quit to Install" : self.availableVersion
-                ? [NSString stringWithFormat:@"Update to OpenCE %@…", self.availableVersion] : @"Check for Updates…";
+                ? [NSString stringWithFormat:@"Update to MeshCE %@…", self.availableVersion] : @"Check for Updates…";
     }
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)entry {
     if (self.importing) return NO;
     if (entry.action == @selector(showGame:)) return self.gameRunning;
-    if (entry.action == @selector(toggleFullscreen:)) return self.gameRunning;
+    if (entry.action == @selector(hideGame:))
+        return self.gameRunning && !self.quitting && !host_sdl_game_is_background();
+    if (entry.action == @selector(toggleFullscreen:))
+        return self.gameRunning && !host_sdl_game_is_background();
     if (entry.action == @selector(checkUpdates:))
         return (self.forkUpdater || self.updater.updater.canCheckForUpdates) && !self.pendingInstall && !self.forkUpdateBusy;
     return YES;
@@ -283,6 +296,16 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     /* The window may have been created before this app was active. */
     host_menu_window_changed();
 }
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+    (void)sender;
+    (void)flag;
+    if (self.gameRunning && !self.quitting) host_sdl_show_game();
+    return NO;
+}
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    (void)sender;
+    return NO;
+}
 - (void)refreshFullscreen {
     self.fullscreenButton.state = (self.gameRunning ? host_sdl_is_fullscreen() : !self.preferences.windowed)
         ? NSControlStateValueOn : NSControlStateValueOff;
@@ -303,16 +326,17 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     }
 }
 - (void)showGame:(id)sender { (void)sender; host_sdl_show_game(); }
+- (void)hideGame:(id)sender { (void)sender; host_sdl_background_game(); }
 - (void)about:(id)sender {
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
     NSString *version = info[@"CFBundleShortVersionString"] ?: @"";
     (void)sender;
     host_sdl_release_mouse();
     /* A testing install names itself here, so it can be told from a main build. */
-    if ([info[@"OpenCEMacUpdateChannel"] isEqual:@"testing"] && version.length)
+    if ([info[@"MeshCEMacUpdateChannel"] isEqual:@"testing"] && version.length)
         version = [version stringByAppendingString:@" testing"];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
-        NSAboutPanelOptionApplicationName: @"OpenCE",
+        NSAboutPanelOptionApplicationName: @"MeshCE",
         NSAboutPanelOptionApplicationVersion: version
     }];
 }
@@ -325,9 +349,9 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     else [NSApp terminate:self];
 }
 - (void)buildSettings {
-    self.settingsWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 542)
+    self.settingsWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 360)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    self.settingsWindow.title = @"OpenCE Settings";
+    self.settingsWindow.title = @"MeshCE Settings";
     self.settingsWindow.releasedWhenClosed = NO;
     self.settingsWindow.preventsApplicationTerminationWhenModal = NO;
     self.settingsWindow.level = NSFloatingWindowLevel;
@@ -342,7 +366,7 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     self.sourceLabel = label(content, @"", NSMakeRect(24, 182, 472, 20), YES);
     button(content, @"Choose Disc Image…", @selector(selectImage:), NSMakeRect(20, 143, 183, 32));
     button(content, @"Choose Maps Folder…", @selector(selectFolder:), NSMakeRect(211, 143, 193, 32));
-    label(content, @"Changes to game data take effect when OpenCE next opens.", NSMakeRect(24, 116, 472, 19), YES).font = [NSFont systemFontOfSize:11];
+    label(content, @"Changes to game data take effect when MeshCE next opens.", NSMakeRect(24, 116, 472, 19), YES).font = [NSFont systemFontOfSize:11];
     self.automaticUpdatesButton = [NSButton checkboxWithTitle:@"Automatically check for updates"
                                                                   target:self action:@selector(automaticUpdates:)];
     self.automaticUpdatesButton.frame = NSMakeRect(24, 78, 472, 24);
@@ -355,31 +379,6 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     button(content, @"Advanced Settings…", @selector(openConfig:), NSMakeRect(20, 14, 185, 32));
     NSButton *done = button(content, @"Done", @selector(closeSettings:), NSMakeRect(401, 14, 95, 32));
     done.keyEquivalent = @"\r";
-    for (NSView *view in content.subviews) {
-        if (view.frame.origin.y >= 116) {
-            NSRect frame = view.frame; frame.origin.y += 150; view.frame = frame;
-        }
-    }
-    label(content, @"Community Maps", NSMakeRect(24, 227, 472, 22), NO).font = [NSFont boldSystemFontOfSize:13];
-    self.communityDownloadsButton = [NSButton checkboxWithTitle:@"Download approved community maps in the background"
-        target:self action:@selector(communityDownloads:)];
-    self.communityDownloadsButton.frame = NSMakeRect(24, 197, 472, 24);
-    self.communityDownloadsButton.enabled = self.mapDownloads.configured && self.mapDownloads.compatibleData;
-    [content addSubview:self.communityDownloadsButton];
-    self.downloadsLabel = label(content, @"", NSMakeRect(24, 149, 472, 42), YES);
-    self.downloadsLabel.lineBreakMode = NSLineBreakByWordWrapping;
-    self.downloadsLabel.maximumNumberOfLines = 2;
-    self.downloadsLabel.font = [NSFont systemFontOfSize:11];
-    button(content, @"Check Maps / Retry", @selector(checkMaps:), NSMakeRect(20, 108, 164, 32));
-    button(content, @"Cancel Downloads", @selector(cancelMaps:), NSMakeRect(190, 108, 151, 32));
-    button(content, @"Open Library", @selector(openMapLibrary:), NSMakeRect(347, 108, 149, 32));
-    for (NSView *view in content.subviews) {
-        if (view.frame.origin.y >= 108) {
-            NSRect frame = view.frame; frame.origin.y += 42; view.frame = frame;
-        }
-    }
-    self.packageImportButton = button(content, @"Import Community Package…", @selector(importCommunityPackage:), NSMakeRect(20, 108, 250, 32));
-    label(content, @"Uses your original disc data", NSMakeRect(278, 114, 218, 20), YES).font = [NSFont systemFontOfSize:11];
 }
 - (void)refreshSettings {
     self.dataLabel.stringValue = self.preferences.dataPath ?: self.launchDataPath ?: @"No maps selected";
@@ -390,12 +389,6 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
         self.automaticUpdatesButton.state = self.forkUpdater.automatic ? NSControlStateValueOn : NSControlStateValueOff;
     else
         self.automaticUpdatesButton.state = self.updater.updater.automaticallyChecksForUpdates ? NSControlStateValueOn : NSControlStateValueOff;
-    self.communityDownloadsButton.state = self.preferences.communityDownloadsEnabled ? NSControlStateValueOn : NSControlStateValueOff;
-    self.downloadsLabel.stringValue = self.packageStatus ?: self.mapDownloads.statusText ?: @"Map hosting is not configured for this build.";
-    self.downloadsLabel.toolTip = self.downloadsLabel.stringValue;
-    BOOL packageTools = [NSBundle.mainBundle URLForResource:@"ContentTools" withExtension:@"json"] != nil;
-    self.packageImportButton.enabled = packageTools && self.mapDownloads.compatibleData && !self.importing;
-    self.packageImportButton.toolTip = packageTools ? @"Rebuild a community map using your original Xbox game data." : @"This build does not include community package import.";
     [self refreshFullscreen];
 }
 - (void)showSettings:(id)sender {
@@ -404,6 +397,8 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     if (!self.settingsWindow) [self buildSettings];
     [self refreshSettings];
     [self.settingsWindow center];
+    if (host_sdl_game_is_background())
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [NSApp activateIgnoringOtherApps:YES];
     [self.settingsWindow makeKeyAndOrderFront:self];
     /* Return to SDL immediately: the guest must keep servicing its network
@@ -418,7 +413,10 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     self.settingsVisible = NO;
     [self.settingsWindow orderOut:self];
     [self updateSystemChrome];
-    if (self.gameRunning && !self.quitting) host_sdl_show_game();
+    if (self.gameRunning && !self.quitting) {
+        if (host_sdl_game_is_background()) host_menu_note_background(1);
+        else host_sdl_show_game();
+    }
 }
 - (void)automaticUpdates:(NSButton *)sender {
     if (self.forkUpdater) {
@@ -439,7 +437,7 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     }
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"Allow community map downloads?";
-    alert.informativeText = @"OpenCE will download approved maps from this build's configured HTTPS catalog into Application Support. Missing maps and the catalog's selected launch maps can download while you play. Your original maps and disc images stay in place.";
+    alert.informativeText = @"MeshCE will download approved maps from this build's configured HTTPS catalog into Application Support. Missing maps and the catalog's selected launch maps can download while you play. Your original maps and disc images stay in place.";
     [alert addButtonWithTitle:@"Allow Downloads"];
     [alert addButtonWithTitle:@"Cancel"];
     [alert beginSheetModalForWindow:self.settingsWindow completionHandler:^(NSModalResponse response) {
@@ -463,7 +461,7 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     NSOpenPanel *panel = NSOpenPanel.openPanel;
     panel.canChooseDirectories = NO; panel.canChooseFiles = YES; panel.allowsMultipleSelection = NO;
     panel.allowedFileTypes = @[@"hogpkg"]; panel.allowsOtherFileTypes = NO; panel.resolvesAliases = NO;
-    panel.message = @"Choose an OpenCE community package. OpenCE will build its playable map from this package and your original Xbox disc data, then keep it in your map library.";
+    panel.message = @"Choose a MeshCE community package. MeshCE will build its playable map from this package and your original Xbox disc data, then keep it in your map library.";
     [panel beginSheetModalForWindow:self.settingsWindow completionHandler:^(NSModalResponse response) {
         if (response != NSModalResponseOK || self.importing) return;
         self.importing = YES; self.packageStatus = @"Checking community package…"; [self refreshSettings];
@@ -513,7 +511,7 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     } else {
         NSAlert *alert = [[NSAlert alloc] init];
         alert.messageText = @"Advanced settings appear after the first game launch";
-        alert.informativeText = @"Start OpenCE once to create its controls and advanced settings file.";
+        alert.informativeText = @"Start MeshCE once to create its controls and advanced settings file.";
         if (self.gameRunning) {
             [self showSettings:nil];
             [alert beginSheetModalForWindow:self.settingsWindow completionHandler:nil];
@@ -544,9 +542,9 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
     NSError *copyError = nil;
     unsigned long long bytes = HaloGameDataCopySize(valid, &copyError);
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Let OpenCE manage a copy of these maps?";
+    alert.messageText = @"Let MeshCE manage a copy of these maps?";
     alert.informativeText = copyError ? @"This folder uses linked map data. Use it in place to preserve your developer setup."
-        : [NSString stringWithFormat:@"OpenCE can copy about %.1f GB into its Application Support folder and organize community maps there. Your original files stay in place.", bytes / 1073741824.0];
+        : [NSString stringWithFormat:@"MeshCE can copy about %.1f GB into its Application Support folder. Your original files stay in place.", bytes / 1073741824.0];
     [alert addButtonWithTitle:@"Copy and Manage"];
     [alert addButtonWithTitle:@"Use This Folder"];
     [alert addButtonWithTitle:@"Cancel"];
@@ -567,7 +565,7 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
 - (void)copyFolder:(NSURL *)folder completion:(void (^)(BOOL))completion {
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 470, 130)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    window.title = @"Copying OpenCE Maps";
+    window.title = @"Copying MeshCE Maps";
     window.level = NSFloatingWindowLevel;
     NSTextField *progressLabel = label(window.contentView, @"Preparing a managed copy…", NSMakeRect(24, 78, 422, 22), NO);
     NSProgressIndicator *bar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(24, 48, 422, 18)];
@@ -630,13 +628,13 @@ declining leaves it for the next time the app opens */
         char detail[512] = {0};
         NSError *error = nil;
         alert.messageText = @"The loading screen picture is missing";
-        alert.informativeText = @"Your maps folder has no loading.tga. Choose your Xbox Halo disc image and OpenCE will read that picture from default.xbe.";
+        alert.informativeText = @"Your maps folder has no loading.tga. Choose your Xbox Halo disc image and MeshCE will read that picture from default.xbe.";
         [alert addButtonWithTitle:@"Choose Disc Image…"];
         [alert addButtonWithTitle:@"Continue"];
         if ([alert runModal] != NSAlertFirstButtonReturn) return;
         panel = NSOpenPanel.openPanel;
         panel.title = @"Choose Your Xbox Halo Disc Image";
-        panel.message = @"OpenCE reads the loading screen picture from the disc's default.xbe.";
+        panel.message = @"MeshCE reads the loading screen picture from the disc's default.xbe.";
         panel.canChooseDirectories = NO;
         panel.canChooseFiles = YES;
         panel.allowsMultipleSelection = NO;
@@ -674,7 +672,7 @@ declining leaves it for the next time the app opens */
 - (void)importImage:(NSURL *)image completion:(void (^)(BOOL))completion {
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 470, 130)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    window.title = @"Importing OpenCE Maps";
+    window.title = @"Importing MeshCE Maps";
     window.level = NSFloatingWindowLevel;
     NSTextField *progressLabel = label(window.contentView, @"Reading disc image…", NSMakeRect(24, 78, 422, 22), NO);
     NSProgressIndicator *bar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(24, 48, 422, 18)];
@@ -709,7 +707,7 @@ declining leaves it for the next time the app opens */
     if (!self.gameRunning) return;
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"Game data updated";
-    alert.informativeText = @"OpenCE will use your selection the next time it opens. Your current game can continue.";
+    alert.informativeText = @"MeshCE will use your selection the next time it opens. Your current game can continue.";
     [self showSettings:nil];
     [alert beginSheetModalForWindow:self.settingsWindow completionHandler:nil];
 }
@@ -794,7 +792,7 @@ declining leaves it for the next time the app opens */
                 NSAlert *alert = [[NSAlert alloc] init];
                 BOOL onTesting = [[strong.forkUpdater channel] isEqual:@"testing"];
                 BOOL wantsTesting = [strong.forkUpdater testingReleases];
-                alert.messageText = error ? @"OpenCE could not check for an update" : @"OpenCE is up to date";
+                alert.messageText = error ? @"MeshCE could not check for an update" : @"MeshCE is up to date";
                 if (error)
                     alert.informativeText = error.localizedDescription;
                 else if (onTesting && !wantsTesting)
@@ -841,22 +839,22 @@ declining leaves it for the next time the app opens */
     [NSApp activateIgnoringOtherApps:YES];
     NSAlert *question = [[NSAlert alloc] init];
     if (switching && toTesting) {
-        question.messageText = @"A testing version of OpenCE is available";
+        question.messageText = @"A testing version of MeshCE is available";
         question.informativeText = [NSString stringWithFormat:
             @"Testing mac %ld is available. This is mac %d.\n\nDo you want to update? The game will close and start the testing version.",
             build, HALO_MAC_UPDATE_BUILD];
     } else if (switching) {
-        question.messageText = @"Return to the main OpenCE release?";
+        question.messageText = @"Return to the main MeshCE release?";
         question.informativeText = [NSString stringWithFormat:
             @"Mac %ld is the latest main release. This is testing mac %d.\n\nThe game will close and start that version.",
             build, HALO_MAC_UPDATE_BUILD];
     } else if (toTesting) {
-        question.messageText = @"A new testing version of OpenCE is available";
+        question.messageText = @"A new testing version of MeshCE is available";
         question.informativeText = [NSString stringWithFormat:
             @"Testing mac %ld is available. This is testing mac %d.\n\nDo you want to update? The game will close and start the new version.",
             build, HALO_MAC_UPDATE_BUILD];
     } else {
-        question.messageText = @"A new version of OpenCE is available";
+        question.messageText = @"A new version of MeshCE is available";
         question.informativeText = [NSString stringWithFormat:
             @"Mac %ld is available. This is mac %d.\n\nDo you want to update? The game will close and start the new version.",
             build, HALO_MAC_UPDATE_BUILD];
@@ -887,7 +885,7 @@ declining leaves it for the next time the app opens */
     self.forkUpdateBusy = YES;
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 420, 120)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    window.title = @"Updating OpenCE";
+    window.title = @"Updating MeshCE";
     window.releasedWhenClosed = NO;
     label(window.contentView, @"Downloading the new version.", NSMakeRect(24, 72, 372, 22), NO);
     NSTextField *status = label(window.contentView, @"Starting the download.", NSMakeRect(24, 48, 372, 20), YES);
@@ -968,7 +966,7 @@ declining leaves it for the next time the app opens */
 - (void)standardUserDriverWillHandleShowingUpdate:(BOOL)handle forUpdate:(SUAppcastItem *)update state:(SPUUserUpdateState *)state {
     (void)handle; (void)state;
     self.availableVersion = update.displayVersionString;
-    self.status.button.toolTip = [NSString stringWithFormat:@"OpenCE %@ is available", self.availableVersion];
+    self.status.button.toolTip = [NSString stringWithFormat:@"MeshCE %@ is available", self.availableVersion];
 }
 - (BOOL)updater:(SPUUpdater *)updater shouldPostponeRelaunchForUpdate:(SUAppcastItem *)update untilInvokingBlock:(void (^)(void))install {
     (void)updater; (void)update;
@@ -977,7 +975,7 @@ declining leaves it for the next time the app opens */
         return NO;
     }
     self.pendingInstall = install;
-    self.status.button.toolTip = @"OpenCE update ready — quit the game to install";
+    self.status.button.toolTip = @"MeshCE update ready — quit the game to install";
     return YES;
 }
 - (BOOL)updater:(SPUUpdater *)updater willInstallUpdateOnQuit:(SUAppcastItem *)update immediateInstallationBlock:(void (^)(void))install {
@@ -1004,7 +1002,9 @@ void host_menu_style_window(void *window) {
     native.restorable = NO;
     native.styleMask |= NSWindowStyleMaskFullSizeContentView;
     native.movableByWindowBackground = NO;
-    [native standardWindowButton:NSWindowCloseButton].hidden = YES;
+    /* Close hides the window. Quit stays in the menu bar. */
+    BOOL fullscreen = (SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) != 0;
+    [native standardWindowButton:NSWindowCloseButton].hidden = fullscreen;
     [native standardWindowButton:NSWindowMiniaturizeButton].hidden = YES;
     [native standardWindowButton:NSWindowZoomButton].hidden = YES;
 }
@@ -1064,7 +1064,7 @@ int host_menu_prepare(const char *support, const char *fallback, char *data, siz
         }
         while (!valid) {
             NSAlert *alert = [[NSAlert alloc] init];
-            alert.messageText = @"Choose your OpenCE game data";
+            alert.messageText = @"Choose your MeshCE game data";
             alert.informativeText = @"Use your own original Xbox Halo disc image or extracted maps folder. The app does not include game data.";
             [alert addButtonWithTitle:@"Choose Disc Image…"];
             [alert addButtonWithTitle:@"Choose Maps Folder…"];
@@ -1087,28 +1087,100 @@ int host_menu_prepare(const char *support, const char *fallback, char *data, siz
         } else if (menu.updater) {
             [menu.updater startUpdater];
         }
-        NSURL *downloadConfiguration = [NSBundle.mainBundle URLForResource:@"map-downloads" withExtension:@"json"];
-        NSData *downloadSettings = downloadConfiguration ? [NSData dataWithContentsOfURL:downloadConfiguration] : nil;
-        NSDictionary *downloadConfig = downloadSettings ? [NSJSONSerialization JSONObjectWithData:downloadSettings options:0 error:nil] : nil;
-        menu.mapDownloads = [[HaloMapDownloads alloc] initWithSupportDirectory:menu.preferences.supportDirectory
-            configuration:downloadConfig sessionConfiguration:nil];
-        [menu.mapDownloads setGameDataRoot:valid];
-        [menu.mapDownloads activateForHost];
-        __weak HaloMenu *weakMenu = menu;
-        menu.mapDownloads.statusChanged = ^{ [weakMenu refreshSettings]; };
-        [menu.mapDownloads startEnabled:menu.preferences.communityDownloadsEnabled];
         if (!getenv("HALO_WINDOWED")) SDL_setenv_unsafe("HALO_WINDOWED", menu.preferences.windowed ? "1" : "0", 1);
         return [valid.path getCString:data maxLength:capacity encoding:NSUTF8StringEncoding] ? 1 : 0;
     }
 }
 void host_menu_begin_game(void) { menu.gameRunning = YES; [menu refreshFullscreen]; }
+
+/* The first unicast to the local network is what makes macOS ask. A match
+connection used to be that packet, and accepting the prompt reset it. */
+void host_menu_allow_local_network(void)
+{
+    struct ifaddrs *list = NULL;
+    struct ifaddrs *item;
+    int sock;
+    int sent = 0;
+
+    if (getifaddrs(&list) != 0)
+        return;
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        freeifaddrs(list);
+        return;
+    }
+    {
+        int enabled = 1;
+
+        setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled));
+        setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
+    }
+    for (item = list; item; item = item->ifa_next) {
+        struct sockaddr_in *address;
+        struct sockaddr_in target;
+        unsigned char packet[1] = {0};
+        uint32_t host_order;
+        uint32_t gateway;
+
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_INET)
+            continue;
+        if (item->ifa_flags & IFF_LOOPBACK)
+            continue;
+        address = (struct sockaddr_in *)item->ifa_addr;
+        host_order = ntohl(address->sin_addr.s_addr);
+        if ((host_order >> 24) == 127)
+            continue;
+        memset(&target, 0, sizeof(target));
+        target.sin_family = AF_INET;
+        target.sin_port = htons(9);
+        gateway = (host_order & 0xffffff00u) | 1u;
+        if (gateway != host_order) {
+            target.sin_addr.s_addr = htonl(gateway);
+            if (sendto(sock, packet, 1, 0, (struct sockaddr *)&target, sizeof(target)) >= 0)
+                sent = 1;
+        }
+        if (item->ifa_broadaddr && item->ifa_broadaddr->sa_family == AF_INET) {
+            target.sin_addr = ((struct sockaddr_in *)item->ifa_broadaddr)->sin_addr;
+            if (sendto(sock, packet, 1, 0, (struct sockaddr *)&target, sizeof(target)) >= 0)
+                sent = 1;
+        }
+    }
+    close(sock);
+    freeifaddrs(list);
+    fprintf(stderr, "Asking macOS for permission to find players on the local network\n");
+    if (!sent)
+        return;
+    @autoreleasepool {
+        [NSApp activateIgnoringOtherApps:YES];
+        NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.3];
+        while ([until timeIntervalSinceNow] > 0)
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:until];
+    }
+}
+void host_menu_note_background(int hidden) {
+    if (!menu || menu.quitting) return;
+    if (menu.status.button)
+        menu.status.button.toolTip = hidden
+            ? @"MeshCE is running in the background. Quit from this menu to stop it."
+            : @"MeshCE";
+    [menu updateSystemChrome];
+    NSApplicationActivationPolicy policy = hidden && !menu.settingsVisible
+        ? NSApplicationActivationPolicyAccessory
+        : NSApplicationActivationPolicyRegular;
+    if (NSApp.activationPolicy != policy)
+        [NSApp setActivationPolicy:policy];
+    if (!hidden && menu.gameRunning)
+        [NSApp activateIgnoringOtherApps:YES];
+}
 void host_menu_window_changed(void) {
     /* open from the update helper can create the window before the app is
        active, and macOS then leaves fullscreen undone. A windowed choice
-       (HALO_WINDOWED) stays windowed. */
+       (HALO_WINDOWED) stays windowed. A hidden game keeps its saved mode
+       until Show Game. */
     static int applying;
     const char *windowed = SDL_getenv("HALO_WINDOWED");
-    if (!applying && !(windowed && SDL_atoi(windowed)) && !host_sdl_is_fullscreen()) {
+    if (!applying && !host_sdl_game_is_background() &&
+        !(windowed && SDL_atoi(windowed)) && !host_sdl_is_fullscreen()) {
         applying = 1;
         host_sdl_set_fullscreen(1);
         applying = 0;

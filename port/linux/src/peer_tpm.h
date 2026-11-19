@@ -157,8 +157,8 @@ static void tpm_put_public_ecc(struct tpm_writer *w, int signing)
 		tpm_w_u16(w, 0x0010u);
 	tpm_w_u16(w, 0x0003u);
 	tpm_w_u16(w, 0x0010u);
-	tpm_fill_label(label_x, signing ? "OpenCE peer sign v1" : "OpenCE peer parent v1", 0);
-	tpm_fill_label(label_y, signing ? "OpenCE peer sign y1" : "OpenCE peer parent y1",
+	tpm_fill_label(label_x, signing ? "MeshCE peer sign v1" : "MeshCE peer parent v1", 0);
+	tpm_fill_label(label_y, signing ? "MeshCE peer sign y1" : "MeshCE peer parent y1",
 		(unsigned char)(signing ? 0x22 : 0x11));
 	tpm_w_u16(w, 32);
 	tpm_w_bytes(w, label_x, 32);

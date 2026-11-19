@@ -251,8 +251,8 @@ is joined once its clock is moving.
 
 This Mac build plays that options record (time limit, loadout, friendly fire,
 vehicle respawn, team balance, radar, vehicle sets, and no-map-weapons) and
-keeps OpenCE capability on advertisement flag `0x04`, distinct from the in-progress
-flag `0x02`. An enabled OpenCE session advertises version `0x800B`.
+keeps MeshCE capability on advertisement flag `0x04`, distinct from the in-progress
+flag `0x02`. An enabled MeshCE session advertises version `0x800B`.
 
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console
@@ -416,15 +416,11 @@ change. Clients take it only from the host and default to blocked until it
 arrives. This adds distributed message 90; network version 32 requires
 matching builds so an older client cannot silently ignore the rule.
 
-Server Setup's MODS is ALLOWED or NOT ALLOWED (`network.mods_allowed`,
-default allowed). NOT ALLOWED makes the host and every client play the
-map's own tags for that game. The host sends distributed message 103
-reliably when a client is ready and when the choice changes. A client
-answers with message 104. The network version stays 41. A machine that
-does not answer is dropped from a game that does not allow mods, so an
-older client cannot keep its mods there. A game that allows mods still
-takes an older client. The choice is this machine's config. It is not a
-simulated rule, and a mod still changes no tag the game simulates.
+The host tells every other machine to play the map's own tags. It sends
+distributed message 103 reliably when a client is ready. A client answers
+with message 104. The network version stays 41. A machine that does not
+answer is dropped, so an older client cannot keep its own tags in that
+game. The choice is not a simulated rule.
 
 ## Joining a game in progress
 

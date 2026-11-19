@@ -85,13 +85,16 @@ struct matchmaking_offer
 	int players;
 	/* how many players are in the lobby now. -1 when the offer did not say */
 	int joined;
-	/* seconds the server will still look for parties. 0 means the roster is
-	full. -1 means there is no countdown. */
+	/* seconds until the match starts once the lobby is ready. 0 is the old
+	backstop. -1 means there is no countdown. */
 	int wait_seconds;
 	/* party is the private lobby. search is after Find Game. */
 	int phase;
 	/* local players this machine may add, before the other seats are counted */
 	int local_max;
+	/* local players already on the host. team balance counts these seats,
+	not only the one host name on the offer. 0 means one. */
+	int host_seats;
 	int name_count;
 	char names[MATCHMAKING_LOBBY_NAMES][MATCHMAKING_LOBBY_NAME_LENGTH];
 	/* which party each name is in. -1 when that name is not in a party.
@@ -150,6 +153,23 @@ void matchmaking_set_locals(int locals);
 /* humans in this lobby right now, including a friend who joined the link.
 the seats the service fills are not included. publishing continues after Find Game. */
 void matchmaking_set_players(int players);
+/* people sitting in this lobby. the host's start wait follows that count. */
+void matchmaking_note_seated(int humans);
+/* a finished matchmaking game is back in the lobby. humans is how many
+finished it. the next map comes from a new match id, and the countdown is
+30 seconds once that many are seated again. 1 when that lobby is ready. */
+int matchmaking_begin_rematch(int humans);
+/* how many humans the lobby is waiting to seat again. 0 before a rematch. */
+int matchmaking_rematch_target(void);
+/* this find-game join returns to the same playlist if that lobby is full. */
+void matchmaking_arm_rejoin(void);
+void matchmaking_clear_rejoin(void);
+/* 1 when a full or closed lobby should put this player back into the search. */
+int matchmaking_rejoin_pending(void);
+/* the next main menu opens the same playlist and searches again. */
+void matchmaking_mark_resume(void);
+/* 1 when that reopen is waiting. the playlist is copied. */
+int matchmaking_take_resume(char *playlist, int size);
 /* 1 when this name is a seat the service listed besides this client's own name. */
 int matchmaking_name_is_filler(const wchar_t *name);
 /* Find Game: ready becomes true and publishing continues. */
@@ -206,6 +226,10 @@ int matchmaking_take_offer(struct matchmaking_offer *offer);
 int matchmaking_link(void);
 /* the port a matchmaking game is using, or 0 for an ordinary game */
 unsigned short matchmaking_game_port(void);
+/* 1 in a matchmaking free for all. everyone hears the voice. */
+int matchmaking_voice_open(void);
+/* 1 in matchmaking 2v2 or Ranked. voice and text stay on the team. */
+int matchmaking_comms_team(void);
 void matchmaking_set_game_port(unsigned short port);
 /* 0 or 1 for a matchmaking team game, -1 otherwise. host_local is the host's
 own player and is team 0. a filler name, one matchmaking_name_is_filler
@@ -238,5 +262,9 @@ returns 0 if a listed name is still missing 15 seconds after that 0 arrived.
 a positive wait is that many seconds, and not longer than 100.
 matchmaking_may_count says whether the lobby counts at all. */
 unsigned long matchmaking_countdown_ms(void);
+/* 1 when the search looks full from advertised seats and that many players
+are not in the lobby. present is the players actually seated. free for all
+with two people seated is not this wait. */
+int matchmaking_seats_unfilled(int present);
 
 #endif

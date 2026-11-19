@@ -15,6 +15,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from urllib.parse import urlparse
 from xml.parsers.expat import ExpatError
 
@@ -41,7 +42,7 @@ GL = BUILD / "toolchain/gl"
 APP_ICON = "AppIcon.icns"
 APP_VERSION = "0.3.0"
 APP_BUILD = "12"
-APP_NAME = "OpenCE"
+APP_NAME = "MeshCE"
 LEGACY_APP_NAMES = ("Halo CE Universal.app", "Halo OG.app")
 
 
@@ -67,7 +68,7 @@ def build_plugin():
 
 
 def resolve_update_build(explicit):
-    """This app's Mac release number. A newer tag on mastercheese-dev/OpenCE is offered.
+    """This app's Mac release number. A newer tag on bitmoda/MeshCE is offered.
     Zero does not look. The guest updater does not run in this build."""
     if explicit is None:
         raw = os.environ.get("HALO_MAC_UPDATE_BUILD", "0")
@@ -150,8 +151,82 @@ def build_host(update_build):
     run(*link)
 
 
+def _paeth(left, up, up_left):
+    estimate = left + up - up_left
+    if abs(estimate - left) <= abs(estimate - up) and abs(estimate - left) <= abs(estimate - up_left):
+        return left
+    if abs(estimate - up) <= abs(estimate - up_left):
+        return up
+    return up_left
+
+
+def opaque_png(path):
+    """Drop the alpha channel. A transparent edge makes macOS draw the picture
+    inside the rounded icon instead of filling it."""
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError(f"{path} is not a PNG")
+    offset = 8
+    width = height = None
+    color_type = None
+    compressed = []
+    while offset + 8 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        kind = data[offset + 4:offset + 8]
+        chunk = data[offset + 8:offset + 8 + length]
+        offset += 12 + length
+        if kind == b"IHDR":
+            width, height, depth, color_type = struct.unpack(">IIBB", chunk[:10])
+            if depth != 8 or chunk[10] != 0:
+                raise RuntimeError(f"{path} is not an 8-bit non-interlaced PNG")
+        elif kind == b"IDAT":
+            compressed.append(chunk)
+        elif kind == b"IEND":
+            break
+    if color_type == 2:
+        return
+    if color_type != 6:
+        raise RuntimeError(f"{path} is not an RGB PNG")
+    raw = zlib.decompress(b"".join(compressed))
+    rows = []
+    cursor = 0
+    stride = width * 4
+    previous = bytearray(stride)
+    for _ in range(height):
+        filter_type = raw[cursor]
+        cursor += 1
+        row = bytearray(raw[cursor:cursor + stride])
+        cursor += stride
+        if filter_type == 1:
+            for index in range(stride):
+                row[index] = (row[index] + (row[index - 4] if index >= 4 else 0)) & 255
+        elif filter_type == 2:
+            for index in range(stride):
+                row[index] = (row[index] + previous[index]) & 255
+        elif filter_type == 3:
+            for index in range(stride):
+                left = row[index - 4] if index >= 4 else 0
+                row[index] = (row[index] + ((left + previous[index]) // 2)) & 255
+        elif filter_type == 4:
+            for index in range(stride):
+                left = row[index - 4] if index >= 4 else 0
+                up_left = previous[index - 4] if index >= 4 else 0
+                row[index] = (row[index] + _paeth(left, previous[index], up_left)) & 255
+        elif filter_type != 0:
+            raise RuntimeError(f"{path} has an unknown PNG filter")
+        previous = row
+        rows.append(bytes(row[index] for index in range(stride) if index % 4 != 3))
+    rgb = b"".join(b"\x00" + row for row in rows)
+
+    def chunk(kind, payload):
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rgb)) + chunk(b"IEND", b""))
+
+
 def package_icon(resources):
-    source = require(ROOT / "port/assets/icon/opence-icon.png")
+    source = require(ROOT / "port/assets/icon/meshce-icon.png")
     with tempfile.TemporaryDirectory(prefix="halo-macos-icon-") as temporary:
         iconset = Path(temporary) / "AppIcon.iconset"
         iconset.mkdir()
@@ -164,6 +239,7 @@ def package_icon(resources):
                 subprocess.run(["/usr/bin/sips", "-z", str(pixels), str(pixels),
                                 str(source), "--out", str(target)],
                                check=True, stdout=subprocess.DEVNULL)
+                opaque_png(target)
                 images[(size, scale)] = target.read_bytes()
         # PNG-backed ICNS representations avoid iconutil's rejection of valid
         # RGB-only iconsets on some macOS SDKs; keep the existing icon artwork.
@@ -245,7 +321,6 @@ def package_into(app, data_root, *, sign_identity, release, version, build, cont
     shutil.copy2(BUILD / "halo", executable)
     shutil.copy2(BUILD / "halo_guest.elf", resources / "halo_guest.elf")
     shutil.copy2(ROOT / "port/macos/map-downloads.json", resources / "map-downloads.json")
-    shutil.copy2(ROOT / "port/assets/network/brokers.txt", resources / "brokers.txt")
     shutil.copy2(ROOT / "port/assets/opening/opening_frames.bin", resources / "opening_frames.bin")
     sdl = frameworks / "libSDL3.0.dylib"
     if sdl.exists():
@@ -299,7 +374,7 @@ def package_into(app, data_root, *, sign_identity, release, version, build, cont
         "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
         "CFBundleVersion": build, "LSMinimumSystemVersion": minimum_macos_version([
             executable, sdl, *angle_libraries, sparkle / "Sparkle", *content_binaries]),
-        "CFBundleURLTypes": [{"CFBundleURLName": "OpenCE",
+        "CFBundleURLTypes": [{"CFBundleURLName": "MeshCE",
                               # Match the shared discord.application_id default.
                               "CFBundleURLSchemes": ["halo", "discord-1553978809840050229"],
                               "CFBundleTypeRole": "Viewer"}],
@@ -311,8 +386,8 @@ def package_into(app, data_root, *, sign_identity, release, version, build, cont
     if update_build > 0:
         if update_channel not in ("main", "testing"):
             raise RuntimeError("The Mac update channel must be main or testing")
-        info["OpenCEMacUpdateBuild"] = update_build
-        info["OpenCEMacUpdateChannel"] = update_channel
+        info["MeshCEMacUpdateBuild"] = update_build
+        info["MeshCEMacUpdateChannel"] = update_channel
     configuration = json.loads((ROOT / "port/macos/release-config.json").read_text())
     if release:
         updates = update_configuration(configuration)
@@ -493,7 +568,7 @@ def main():
     parser.add_argument("--version", default=APP_VERSION)
     parser.add_argument("--build-number", default=APP_BUILD)
     parser.add_argument("--update-build", type=int, default=None,
-                        help="Offer a newer Mac release from mastercheese-dev/OpenCE. 0 does not look.")
+                        help="Offer a newer Mac release from bitmoda/MeshCE. 0 does not look.")
     parser.add_argument("--update-channel", choices=("main", "testing"), default=None,
                         help="main follows build-N. testing follows testing-N prereleases.")
     parser.add_argument("--content-tools", type=Path, metavar="TOOLCHAIN_DIRECTORY",

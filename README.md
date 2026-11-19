@@ -1,32 +1,32 @@
-# OpenCE: Halo: Combat Evolved for Mac, Windows, and Linux
+# MeshCE: Halo: Combat Evolved for Mac, Windows, and Linux
 
 <p align="center">
-  <a href="https://discord.gg/VnYXYbx54G"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/NRFA2NAqx2"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 <p align="center">
-  <img src="port/assets/icon/opence-icon.png" alt="OpenCE" width="384">
+  <img src="port/assets/icon/meshce-icon.png" alt="MeshCE" width="384">
 </p>
 <p align="center">
-  <a href="https://github.com/mastercheese-dev/OpenCE/releases/download/build-75/OpenCE-macos-arm64.dmg"><img src="https://img.shields.io/badge/Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download OpenCE for Mac"></a>
-  <a href="https://github.com/mastercheese-dev/OpenCE/releases/download/build-75/halo-windows-release.zip"><img src="https://img.shields.io/badge/Windows-download-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download OpenCE for Windows"></a>
-  <a href="https://github.com/mastercheese-dev/OpenCE/releases/download/build-75/halo-linux-release.zip"><img src="https://img.shields.io/badge/Linux-download-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download OpenCE for Linux"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-75/OpenCE-macos-arm64.dmg"><img src="https://img.shields.io/badge/Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download MeshCE for Mac"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-75/halo-windows-release.zip"><img src="https://img.shields.io/badge/Windows-download-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download MeshCE for Windows"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-75/halo-linux-release.zip"><img src="https://img.shields.io/badge/Linux-download-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download MeshCE for Linux"></a>
 </p>
 
 <p align="center">
   <img src="docs/images/main-menu.png" alt="Original Halo main menu running on Apple Silicon" width="512">
 </p>
 
-**OpenCE** is Halo: Combat Evolved for Mac, Windows, and Linux. It follows [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), which continues the decompilation of Xbox development build 2342, from [bnunu/halo-1](https://github.com/bnunu/halo-1), itself a fork of [punpckhdq/halo](https://github.com/punpckhdq/halo). Mac, Windows, and Linux each run the game's own code, with a new layer in place of the Xbox hardware. Windows and Linux draw with OpenGL. The Mac build draws with Metal. Sound, input, and gamepads go through SDL3.
+**MeshCE** is Halo: Combat Evolved for Mac, Windows, and Linux. It follows [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), which continues the decompilation of Xbox development build 2342, from [bnunu/halo-1](https://github.com/bnunu/halo-1), itself a fork of [punpckhdq/halo](https://github.com/punpckhdq/halo). Mac, Windows, and Linux each run the game's own code, with a new layer in place of the Xbox hardware. Windows and Linux draw with OpenGL. The Mac build draws with Metal. Sound, input, and gamepads go through SDL3.
 
-You can play with up to 128 players, run campaign co-op online, load Custom Edition maps, change the field of view, browse servers, host peer-to-peer, download missing maps, and use voice chat. With Smooth Motion on, the game draws a frame for every refresh of the display. The simulation stays at 30 ticks a second, as on the Xbox.
+You can play with up to 128 players, run campaign co-op online, host a game peer to peer, join from an invite link, and use Find Game for Free for all, 2v2, and Ranked. Field of view and smooth motion are optional. With Smooth Motion on, the game draws a frame for every refresh of the display. The simulation stays at 30 ticks a second, as on the Xbox. The maps are the original Xbox maps.
 
 ## Download
 
-The Mac button downloads build 75 (`OpenCE-macos-arm64.dmg`). The Windows button downloads build 75 (`halo-windows-release.zip`). The Linux button downloads build 75 (`halo-linux-release.zip`). Each system is published on its own. Those three are on the [releases page](https://github.com/mastercheese-dev/OpenCE/releases).
+The Mac button downloads build 75 (`OpenCE-macos-arm64.dmg`). The Windows button downloads build 75 (`halo-windows-release.zip`). The Linux button downloads build 75 (`halo-linux-release.zip`). Each system is published on its own. Those three are on the [releases page](https://github.com/bitmoda/MeshCE/releases).
 
 | System | Download this | Then |
 | --- | --- | --- |
-| Mac | The newest `OpenCE-macos-arm64` disk image | Open it and drag **OpenCE.app** into Applications |
+| Mac | The newest Mac disk image | Open it and drag **MeshCE.app** into Applications |
 | Windows | The newest `halo-windows-release.zip` | Unzip it and run `halo.exe` |
 | Linux | The newest `halo-linux-release.zip` | Unzip it and run `halo` |
 
@@ -34,12 +34,12 @@ The Mac button downloads build 75 (`OpenCE-macos-arm64.dmg`). The Windows button
 
 The Mac build is for Apple Silicon and macOS 26 or later. The disk image is enough to run the game.
 
-1. Download the newest `OpenCE-macos-arm64` disk image.
-2. Open it and drag **OpenCE.app** into Applications.
-3. Open OpenCE from Applications.
+1. Download the newest Mac disk image.
+2. Open it and drag **MeshCE.app** into Applications.
+3. Open MeshCE from Applications.
 4. The app is ad hoc signed. The first time, macOS may leave it blocked. After you try to open it, allow it in **System Settings**, under **Privacy & Security**. [Apple's steps](https://support.apple.com/en-us/102445) walk through that screen.
 
-On Mac, the helmet in the menu bar opens Settings. Command-comma does the same. F12 releases the mouse so you can reach the menu bar. Escape pauses.
+On Mac, the helmet in the menu bar opens Settings, and the same menu chooses a disc image or a maps folder. Command-comma opens Settings. F12 releases the mouse so you can reach the menu bar. Escape pauses.
 
 ### Windows
 
@@ -47,7 +47,7 @@ On Mac, the helmet in the menu bar opens Settings. Command-comma does the same. 
 2. Unzip it into its own folder.
 3. Run `halo.exe`. Leave `SDL3.dll` in that same folder.
 
-Settings live in `config.toml` next to `halo.exe`. Saves go in `%APPDATA%\halo`, the same folder OpenCE uses.
+Settings live in `config.toml` next to `halo.exe`. Saves go in `%APPDATA%\MeshCE Mesh`.
 
 ### Linux
 
@@ -57,7 +57,7 @@ Settings live in `config.toml` next to `halo.exe`. Saves go in `%APPDATA%\halo`,
 
 On a Steam Deck, do the setup in Desktop Mode. Unzip the release, then in Steam open the Games menu, choose Add a Game, and add `halo` as a non-Steam game. It then starts from Game Mode as well. If the Deck sleeps while it is hosting, the other players lose the host after 15 seconds.
 
-Settings live in `config.toml` next to `halo`. Saves go in `~/.local/share/halo-linux`, the same folder OpenCE uses.
+Settings live in `config.toml` next to `halo`. Saves go in `~/.local/share/meshce-mesh`, or in `$XDG_DATA_HOME/meshce-mesh` when that variable is set.
 
 ### Updates
 
@@ -69,43 +69,32 @@ On Windows and Linux, download a newer zip from the same page and replace the pr
 
 Bring your own copy of the game. The download has no game data.
 
-1. Start the game (`OpenCE.app` on Mac, `halo.exe` on Windows, `halo` on Linux).
-2. The first time, choose your copy in the file picker. On Windows and Linux, a `maps` folder already sitting next to the program is used and the picker stays closed.
-3. On Windows and Linux, No on that question stops the game. Put a `maps` folder next to the program, or set `paths.data` in `config.toml`, and start again.
-4. On Mac, a folder of the game offers **Copy and Manage**, **Use This Folder**, or **Cancel**. Managed copies go under `~/Library/Application Support/OpenCE/Game Data/`. Saves, profiles, and `config.toml` stay in that Application Support directory, the same folder OpenCE uses.
-5. The game sets up `maps` from your copy, then starts.
+1. Start the game (`MeshCE.app` on Mac, `halo.exe` on Windows, `halo` on Linux).
+2. The first time, choose your copy. On Mac the question offers **Choose Disc Image…** or **Choose Maps Folder…**. A disc image is read into `~/Library/Application Support/MeshCE Mesh/Game Data/`. A maps folder offers **Copy and Manage**, **Use This Folder**, or **Cancel**. Managed copies go in that same Game Data folder. Saves, profiles, and `config.toml` stay in `~/Library/Application Support/MeshCE Mesh`.
+3. On Windows and Linux, that first start asks to extract the maps from an Xbox disc image. **Yes** opens a file picker, and the maps are copied next to the program. A `maps` folder already sitting there is used and that question stays closed. **No** stops the game. You can also put a `maps` folder next to the program, or set `paths.data` in `config.toml`, and start again.
+4. The game uses those Xbox maps, then starts.
 
-On Mac, saves and caches stay in `~/Library/Application Support/OpenCE/`. When that folder is not already in use, the first launch copies the first older folder it finds, in this order: `Halo OG`, then `Halo CE Universal`. Files already in the OpenCE folder stay. The older folder stays where it is. If the copy cannot finish, the app explains the error and stops, so the next launch can try again.
+On Mac, saves and caches stay in `~/Library/Application Support/MeshCE Mesh/`. Files already in that folder stay. `Halo OG`, `Halo CE Universal`, and an installed OpenCE folder stay where they are.
 
-Put the Xbox maps in `maps`. Put Custom Edition maps in `custom_maps`, beside `maps`. If `maps` contains Halo PC maps, the game explains that and stops.
+Put the Xbox maps in `maps`. If `maps` contains Halo PC maps, the game explains that and stops.
 
-On Windows and Linux, `maps` sits next to the executable. You can also set `paths.data` in `config.toml` to a folder you already have. On Mac, the first launch offers the same choice: copy the game into Application Support, or use a folder you already have.
+On Windows and Linux, `maps` sits next to the executable, whether that first start extracted it or you placed it there. You can also set `paths.data` in `config.toml` to a folder you already have. On Mac, the first launch offers a disc image or a maps folder. A managed copy goes in `~/Library/Application Support/MeshCE Mesh`.
 
 ## Multiplayer
 
 - **Up to 128 players** on up to 128 machines, and up to 4 players on one device in split screen.
-- **Mac, Windows, and Linux play together.** On a local network they can play LAN.
-- **Peer-to-peer internet hosting.** Join through the server browser or an invite link. A host lists a game as public, or keeps it private for players with the invite. With Discord, the host can send the invite through Discord.
+- **Mac, Windows, and Linux play together.** On a local network they can play LAN. A LAN game does not need an invite.
+- **Peer-to-peer internet hosting.** The host's invite link names that host's address and public key. Opening the link connects to the host. With Discord running, the host can send the same invite through Discord.
+- **Find Game.** On the multiplayer menu, Free for all, 2v2, and Ranked look for other MeshCE players. A new install reaches the built-in introducer, `bitmoda.ddns.net`, and meets the players that machine has heard. Players on the same local network are found by broadcast, and a player met before is tried again at the saved address. The player with the best connection hosts. The mesh does not carry a game between two routers that have no path between them. Rank and games played change for a match found this way. A game joined from an invite link leaves rank and games played unchanged. See [docs/peer-mesh.md](docs/peer-mesh.md).
 - **Online co-op campaign,** with friendly fire, player collisions, and more enemies as the player count grows.
 - **Voice chat:** push to talk (V) or an open microphone, changed in the audio settings.
-- **Map sharing:** a player missing the game's Custom Edition map downloads it from the other players.
 - **Moderation:** the host can kick and ban from the scoreboard, or with the `kick` and `ban` console commands. Players can vote to kick.
 - **Scrollable scoreboard:** the mouse wheel or Page Up and Page Down moves through a large lobby.
 - **Netcode:** each machine moves its own player at once, and the host decides the game. See [port/linux/NETCODE.md](port/linux/NETCODE.md).
 
-## Custom Edition maps
+## Competitive options
 
-Put Halo Custom Edition maps in `custom_maps`, beside `maps`. That folder also needs `bitmaps.map`, `sounds.map`, and `loc.map` from your installed copy of Halo Custom Edition. On Mac, put `custom_maps` beside the Xbox `maps` folder the game is using, including a managed copy under Application Support.
-
-The Gearbox maps that shipped with Halo PC (Ice Fields, Death Island, Danger Canyon, Infinity, Timberland, and Gephyrophobia) are a separate set. Copy them from a Halo Custom Edition install's `maps` folder into `custom_maps`. They then appear under Custom Singleplayer and Custom Multiplayer. A custom singleplayer map plays as a campaign level, alone or as online co-op. Maps that require OpenSauce will not load.
-
-The server browser and the LAN browser can download a missing custom map from the other players, including `bitmaps.map`, `sounds.map`, and `loc.map`. This works on a LAN, and on the internet when the host has map sharing on (the default).
-
-## Community maps and competitive options
-
-Mac Settings can download 40 approved community maps in the background after you opt in. The collection is about 863 MiB, built for Xbox v5 NTSC data. Verified downloads stay usable offline. Windows and Linux currently install matching maps by hand.
-
-**OpenCE Options** offers spawn markers, timer announcements, and optional silent movement and weapon-ready sounds. Those modifications default off. The host chooses them. Use **Stock** for original-rule play. The match clock is each machine's Graphics setting: Off, On, or On with Voice. On with Voice plays the countdown shipped with the game.
+**MeshCE Options** offers spawn markers, timer announcements, and optional silent movement and weapon-ready sounds. Those modifications default off. The host chooses them. Use **Stock** for original-rule play. The match clock is each machine's Graphics setting: Off, On, or On with Voice. On with Voice plays the countdown shipped with the game.
 
 **Match Options**, on the game type, covers movement sounds, training, camouflage, team scores, weapon spread, and field of view. The host's choices apply to the game. Default field of view leaves each player's Graphics setting.
 
@@ -134,7 +123,6 @@ The game keeps the Xbox look until a setting says otherwise.
 | PER-PIXEL LIGHTING | Lights models for each pixel | Off |
 | MODEL DETAIL | Stock uses the Xbox's 480 lines. Native uses this display. Highest keeps the most detail. | Stock |
 | HIGH-RES HUD, BUTTON STYLE, HIGH-RES TEXT | Redrawn HUD art, button art, and text that stay sharp when scaled | On for the high-res HUD and text |
-| CAMPAIGN HUD | On a custom map, draw the campaign HUD. The reticle stays the map's. | Off |
 | MATCH TIMER | A clock at the bottom right in multiplayer. On with Voice also plays the countdown | Off |
 
 ## How to build
@@ -164,7 +152,7 @@ The decompilation is of Xbox build 2342. This tree follows [OpenCE](https://gith
 
 ## Licence
 
-OpenCE is free software: you can give it to others and change it under the
+MeshCE is free software: you can give it to others and change it under the
 terms of the GNU Affero General Public License as published by the Free
 Software Foundation, version 3 of the License or (at your option) any later
 version (`AGPL-3.0-or-later`). It comes with no warranty. The full text is in
@@ -179,6 +167,6 @@ version (`AGPL-3.0-or-later`). It comes with no warranty. The full text is in
 
 ## Disclaimer
 
-OpenCE is an unofficial fan project. It is not endorsed by or affiliated with Microsoft, Xbox Game Studios, Halo Studios, Activision, or Bungie. Halo and Halo: Combat Evolved are trademarks of Microsoft Corporation. Halo is copyright Microsoft Corporation.
+MeshCE is an unofficial fan project. It is not endorsed by or affiliated with Microsoft, Xbox Game Studios, Halo Studios, Activision, or Bungie. Halo and Halo: Combat Evolved are trademarks of Microsoft Corporation. Halo is copyright Microsoft Corporation.
 
 Bring your own copy of the game. The download has no game data.

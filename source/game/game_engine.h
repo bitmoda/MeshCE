@@ -239,7 +239,7 @@ struct game_variant_options
 	/* no weapons spawn on the map (its grenades and powerups do): for
 	a loadout of none, melee only */
 	boolean no_map_weapons;
-	/* OpenCE's gametypes. mode 0 is a game engine's own rules. The rest
+	/* MeshCE's gametypes. mode 0 is a game engine's own rules. The rest
 	name SWAT, Infection, Gun Game, and Hardcore. This build keeps the
 	bytes so a version 41 game record lines up, and plays the game
 	engine's own rules. */
@@ -258,7 +258,7 @@ struct game_variant_options
 };
 
 typedef char verify_game_variant_options_size[sizeof(struct game_variant_options) == 0x2C ? 1 : -1];
-/* builds before the OpenCE modes saved and sent the first 0x1C bytes */
+/* builds before the MeshCE modes saved and sent the first 0x1C bytes */
 #define GAME_VARIANT_OPTIONS_V1_SIZE 0x1C
 
 struct game_engine

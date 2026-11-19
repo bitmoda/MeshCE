@@ -50,7 +50,7 @@ SMAA_ASSETS = Path("port/third_party/smaa")
 SMAA_FILES = (("SMAA.hlsl", "xgpu_smaa_shader"), ("area_tex.zlib", "xgpu_smaa_area_texture"),
               ("search_tex.zlib", "xgpu_smaa_search_texture"))
 # the desktop windows' icon (tools/app_icon.py; port/linux/src/sdl_platform.c)
-WINDOW_ICON = Path("port/assets/icon/opence-icon-256.png")
+WINDOW_ICON = Path("port/assets/icon/meshce-icon-256.png")
 # headphone responses for 3D voices (port/linux/src/dsound_sdl.c, tools/hrtf_assets.py)
 HRTF_ASSET = Path("port/assets/hrtf/sadie_d2_48k.hrtf")
 # the training pad, respawn meshes, and timer recordings (hardcore_assets.c)

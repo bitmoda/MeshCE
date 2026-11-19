@@ -56,9 +56,8 @@ enum
 
 typedef char p2p_listing_invite_size_assert[P2P_LISTING_INVITE_SIZE == P2P_LINK_SIZE ? 1 : -1];
 
-/* OpenCE's public lobby. A key hash in hex follows the slot prefix. The
-query topic asks hosts to publish again (p2p_lobby.c). Listings and
-invites both use hceu/3/, which is the tree the broker relays. */
+/* MeshCE's public lobby names, kept so an old listing still parses. This
+client does not publish one. A key hash in hex follows the slot prefix. */
 #define P2P_LOBBY_SLOT_PREFIX "hceu/3/lobby/s/"
 #define P2P_LOBBY_QUERY_TOPIC "hceu/3/lobby/q"
 
@@ -134,13 +133,13 @@ server browser (going private: those who saw it must not get in); under
 p2p_lock */
 void p2p_new_invite_if_listed(void);
 
-/* ---------- p2p_signal.c: signalling through public MQTT brokers */
+/* ---------- p2p_signal.c: the invite handshake, sent to the address in the link */
 
-/* connects to the brokers, if not already; called from the p2p thread */
+/* called from the p2p thread before a join or a host */
 void p2p_signal_start(void);
-/* adds the signalling sockets to the p2p thread's select lists */
+/* no signalling sockets: the handshake uses the tunnel socket */
 void p2p_signal_select_sets(int *read, int *read_count, int *write, int *write_count, int maximum_count);
-/* services the sockets and timers; called from the p2p thread each pass */
+/* resends a join until the host answers; called from the p2p thread each pass */
 void p2p_signal_update(const int *read, int read_count, const int *write, int write_count);
 /* hosting: listen for joiners who hold this token */
 void p2p_signal_host(const unsigned char *token);
@@ -150,6 +149,16 @@ holding this token, until it answers (or p2p_signal_stop_joining); each call
 asks anew, with a new nonce (as after the session with the host ended
 before the tunnel reached it: the host makes one session of a request) */
 void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token);
+/* 1 for loopback, link-local, a private range, or carrier-grade NAT.
+address is network order. */
+int p2p_address_private(unsigned long address);
+/* the joiner reaches this host directly. key is the host's public mesh key,
+or NULL when the link names none. address and port are network order. */
+void p2p_signal_set_direct(unsigned long address, unsigned short port,
+	const unsigned char host_hash[16], const unsigned char key[32]);
+/* a handshake packet on the tunnel socket. 1 when it was one. */
+int p2p_signal_direct_received(const unsigned char *packet, int size,
+	unsigned long address, unsigned short port);
 void p2p_signal_stop_joining(void);
 /* ... and another player of the host's game (whose key has this hash, as
 the host told), which answers holders of the token as its host does
@@ -158,28 +167,15 @@ the host; 0 if there is no room, or the request to the host is of another
 token. Stopped by its identifier */
 int p2p_signal_join_player(const unsigned char *player_hash, const unsigned char *token);
 void p2p_signal_stop_joining_player(const unsigned char *identifier);
-/* ... and a public game's host (whose key has this hash) with its listing's
-token, only to time the tunnel to it (p2p_probe_start): a request of its own
-token, whose answers come to a topic of their own; 0 if there is no room.
-Stopped by its identifier */
+/* a public game is not timed: this client does not list games. Always 0. */
 int p2p_signal_probe(const unsigned char *host_hash, const unsigned char *token);
 void p2p_signal_stop_probe(const unsigned char *identifier);
-/* every broker's connection made anew at once: after the p2p thread was
-stopped (the process was suspended, or the machine slept), the old ones
-may carry nothing, and would be noticed only at their silence timeout */
+/* kept for the p2p thread. There is no broker connection to make again. */
 void p2p_signal_reconnect(void);
-/* the server browser's topics: the own slot and the queries (a listed
-game), and every slot (browsing) */
+/* the server browser's calls. This client does not publish a listing. */
 void p2p_signal_lobby_topics(int listed, int browsing);
-/* publishes a listing to the own slot on every broker, retained, and again
-on each broker that connects later; closing: a tombstone, after which the
-slot is cleared and nothing is published again */
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing);
-/* asks the hosts to publish again */
 void p2p_signal_lobby_query(void);
-/* the game is quitting: the tombstone published (p2p_signal_lobby_publish)
-and the slot cleared on every ready broker now, whatever their buckets, and
-the connections closed cleanly */
 void p2p_signal_lobby_quit(void);
 
 /* ---------- p2p_crypto.c */

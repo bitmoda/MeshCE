@@ -7,18 +7,22 @@ link games as if they were on one LAN, without a server of this project's.
 - An invite is a link, halo://join/<host><token>: the hash of the X25519
   public key the hosting machine makes each run (16 bytes of it, which no
   other key can be found to have; the first 6 are the machine's identifier,
-  which its XNADDR also carries) and a random 16-byte token. A machine
+  which its XNADDR also carries) and a random 16-byte token. After that,
+  the link names the host's address and its public mesh key (the same key
+  matchmaking keeps; the private key stays on the machine). A machine
   makes one when its game starts hosting (the game listens for
   connections), logs it, and offers it through Discord (p2p_discord.c).
   The player copies it. Nothing about a game is published anywhere else:
-  without an invite there is no way to find or join it.
-- Signalling (p2p_signal.c) goes through public MQTT brokers, on topics
-  that are hashes of the token, with messages sealed with a key derived
-  from it (p2p_crypto.c). A joiner offers its public key and the addresses
-  it can be reached at; the host answers with its own, and makes the
-  session once the joiner, answered, proves that it holds its key. The
-  secret of their session comes from the two keys (X25519) and a nonce of
-  each, and never travels.
+  without an invite there is no way to find or join it.   Rank and games played change only for a mesh match this client is in.
+  A link a player pastes, on its own, does not open one.
+- The joiner sends the handshake straight to the address in the link
+  (p2p_signal.c), sealed with a key derived from the token (p2p_crypto.c).
+  A joiner offers its public key and the addresses it can be reached at;
+  the host answers with its own, and signs that answer with its mesh key.
+  The host makes the session once the joiner, answered, proves that it
+  holds its key. The secret of their session comes from the two keys
+  (X25519) and a nonce of each, and never travels. There is no signalling
+  broker.
 - The tunnel is one UDP socket. Each machine learns its public address from
   public STUN servers, and both then send to each other's addresses until
   packets get through (hole punching). There is no relay: two machines whose
@@ -47,11 +51,8 @@ link games as if they were on one LAN, without a server of this project's.
   joiners' system link lists, and joining works as on a LAN. A peer reaches
   only the game's own ports (xnet.c says which it has), and has a few
   stand-ins and connections at a time.
-- The server browser times the tunnel to each public game's host (its
-  ping): a probe makes the tunnel as a join does, with the listing's token,
-  keeps the shortest of a few pings' round trips, and says goodbye. The
-  game sees nothing of a probe's peer; a join of its host takes its tunnel
-  up.
+- This client does not list public games. Join Game finds a match on the
+  peer mesh, or a player opens an invite link.
 
 The work happens on a thread of its own, under p2p_lock (let go of for
 whatever may wait: DNS, the desktop's link handlers); the game's threads
@@ -373,12 +374,16 @@ static struct
 	int hosting_lan_only;
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
+	int share_key_have;
+	unsigned char share_key[32];
 	/* whether the server browser's exit hook is set (lobby_quit) */
 	int lobby_quit_registered;
 	/* whether the server browser listed this token (p2p_lobby.c): going
 	private makes a new one */
 	int token_listed;
 	char invite[P2P_LINK_SIZE];
+	/* invite plus the host address and public mesh key, once both are known */
+	char share[160];
 	/* the game's players and its most (p2p_set_game_player_counts; 0: not
 	said, and the machines the tunnel reaches are shown), and what Discord
 	was told */
@@ -420,7 +425,7 @@ static struct
 	unsigned char join_token[P2P_TOKEN_SIZE];
 	unsigned long join_time;
 
-	char clipboard[P2P_LINK_SIZE];
+	char clipboard[160];
 	int has_clipboard;
 
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
@@ -519,6 +524,25 @@ static unsigned long network_long(unsigned long value)
 static unsigned short network_short(unsigned short value)
 {
 	return (unsigned short)(value << 8 | value >> 8);
+}
+
+int p2p_address_private(unsigned long address)
+{
+	unsigned long ip = network_long(address);
+	unsigned octet = (unsigned)(ip >> 24);
+	unsigned second = (unsigned)((ip >> 16) & 0xff);
+
+	if (octet == 0 || octet == 10 || octet == 127 || octet >= 224)
+		return 1;
+	if (octet == 169 && second == 254)
+		return 1;
+	if (octet == 172 && second >= 16 && second <= 31)
+		return 1;
+	if (octet == 192 && second == 168)
+		return 1;
+	if (octet == 100 && second >= 64 && second <= 127)
+		return 1;
+	return 0;
 }
 
 static void put_short(unsigned char *bytes, unsigned short value)
@@ -1493,9 +1517,7 @@ static int stun_settled(void)
 /* the p2p thread was stopped for longer than a peer lasts: the process was
 suspended (a phone app in the background) or the machine slept (a laptop).
 The NAT's mapping of the tunnel may have lapsed, so this machine's public
-address is asked again before an offer names it, and the brokers'
-connections, which the network may have dropped, are made anew rather than
-at their silence timeout */
+address is asked again before an offer names it */
 static void network_resumed(unsigned long stopped)
 {
 	int index;
@@ -1505,9 +1527,8 @@ static void network_resumed(unsigned long stopped)
 		p2p.stun[index].has_mapped = 0;
 		p2p.stun[index].attempts = 0;
 	}
-	p2p_signal_reconnect();
-	platform_log("Internet play: the game was stopped for %lu seconds; its public address is asked again and "
-		"the brokers reconnected", stopped / 1000);
+	platform_log("Internet play: the game was stopped for %lu seconds; its public address is asked again",
+		stopped / 1000);
 }
 
 /* ---------- stand-ins for peers' ports */
@@ -2360,6 +2381,8 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 	its number, can be STUN's magic cookie) */
 	if (size < 1 || packet[0] != TUNNEL_MAGIC)
 	{
+		if (p2p_signal_direct_received(packet, size, from->sin_addr.s_addr, from->sin_port))
+			return;
 		if (size >= 20 && packet[4] == 0x21 && packet[5] == 0x12 && packet[6] == 0xA4 && packet[7] == 0x42)
 			stun_received(packet, size, from);
 		return;
@@ -2577,6 +2600,202 @@ static int probe_taken_up(const unsigned char *host)
 
 /* ---------- invites */
 
+/* url-safe base64, no padding. 0 when out is too small. */
+static int share_b64_encode(const unsigned char *in, int length, char *out, int out_size)
+{
+	static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	int index = 0;
+	int written = 0;
+
+	while (index + 3 <= length)
+	{
+		unsigned value = ((unsigned)in[index] << 16) | ((unsigned)in[index + 1] << 8) | in[index + 2];
+
+		if (written + 4 >= out_size)
+			return 0;
+		out[written++] = table[(value >> 18) & 63];
+		out[written++] = table[(value >> 12) & 63];
+		out[written++] = table[(value >> 6) & 63];
+		out[written++] = table[value & 63];
+		index += 3;
+	}
+	if (index < length)
+	{
+		unsigned value = (unsigned)in[index] << 16;
+
+		if (index + 1 < length)
+			value |= (unsigned)in[index + 1] << 8;
+		/* One leftover byte is two characters. Two leftover bytes are three.
+		A fourth character is a padding byte, and the decoder rejects it. */
+		if (written + (index + 1 < length ? 3 : 2) >= out_size)
+			return 0;
+		out[written++] = table[(value >> 18) & 63];
+		out[written++] = table[(value >> 12) & 63];
+		if (index + 1 < length)
+			out[written++] = table[(value >> 6) & 63];
+	}
+	if (written >= out_size)
+		return 0;
+	out[written] = 0;
+	return written;
+}
+
+static int share_b64_value(int character)
+{
+	if (character >= 'A' && character <= 'Z')
+		return character - 'A';
+	if (character >= 'a' && character <= 'z')
+		return character - 'a' + 26;
+	if (character >= '0' && character <= '9')
+		return character - '0' + 52;
+	if (character == '-' || character == '+')
+		return 62;
+	if (character == '_' || character == '/')
+		return 63;
+	return -1;
+}
+
+/* 38 bytes: address (4), port (2), public mesh key (32), all in network order. */
+static int share_b64_decode(const char *text, unsigned char *out, int out_size)
+{
+	int length = 0;
+	int value = 0;
+	int bits = 0;
+
+	if (!text || out_size < 38)
+		return 0;
+	for (; text[length] && share_b64_value((unsigned char)text[length]) >= 0; length++)
+		;
+	if (length < 1)
+		return 0;
+	{
+		int index = 0;
+		int written = 0;
+
+		for (index = 0; index < length; index++)
+		{
+			value = (value << 6) | share_b64_value((unsigned char)text[index]);
+			bits += 6;
+			if (bits >= 8)
+			{
+				unsigned char byte;
+
+				bits -= 8;
+				byte = (unsigned char)((value >> bits) & 0xff);
+				/* An older link wrote a fourth character of zeros for the
+				two-byte remainder. That extra byte is not part of the 38. */
+				if (written >= out_size)
+				{
+					if (byte == 0)
+						continue;
+					return 0;
+				}
+				out[written++] = byte;
+			}
+		}
+		return written == 38;
+	}
+}
+
+/* this machine's public mesh key. the private key is not copied. */
+static int share_key(unsigned char key[32])
+{
+	int have;
+
+	if (p2p.share_key_have)
+	{
+		memcpy(key, p2p.share_key, 32);
+		return 1;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	have = peer_mesh_public(key);
+	pthread_mutex_lock(&p2p_lock);
+	if (!have)
+		return 0;
+	memcpy(p2p.share_key, key, 32);
+	p2p.share_key_have = 1;
+	return 1;
+}
+
+/* the address a joiner can send to, and this machine's public mesh key. */
+static int share_dial(unsigned long *address, unsigned short *port, unsigned char key[32])
+{
+	struct p2p_candidate candidates[8];
+	unsigned long local = posix_local_ipv4_address();
+	int count;
+	int index;
+	int fallback = -1;
+
+	if (!share_key(key))
+		return 0;
+	count = p2p_local_candidates(candidates, 8);
+	for (index = 0; index < count; index++)
+	{
+		if (!candidates[index].address || !candidates[index].port)
+			continue;
+		if (fallback < 0)
+			fallback = index;
+		if (candidates[index].address != local && candidates[index].address != network_long(0x7F000001))
+		{
+			*address = candidates[index].address;
+			*port = candidates[index].port;
+			return 1;
+		}
+	}
+	if (fallback < 0)
+		return 0;
+	*address = candidates[fallback].address;
+	*port = candidates[fallback].port;
+	return 1;
+}
+
+/* invite, then '.' and the address, port, and public mesh key. */
+static void refresh_share_link(void)
+{
+	unsigned char raw[38];
+	unsigned char key[32];
+	char encoded[64];
+	char next[160];
+	unsigned long address = 0;
+	unsigned short port = 0;
+	const char *secret;
+
+	if (!p2p.hosting || !p2p.invite[0])
+		return;
+	if (!share_dial(&address, &port, key))
+	{
+		if (!p2p.share[0])
+			snprintf(p2p.share, sizeof(p2p.share), "%s", p2p.invite);
+		return;
+	}
+	{
+		unsigned long ip = network_long(address);
+		unsigned short shown = network_short(port);
+
+		raw[0] = (unsigned char)(ip >> 24);
+		raw[1] = (unsigned char)(ip >> 16);
+		raw[2] = (unsigned char)(ip >> 8);
+		raw[3] = (unsigned char)ip;
+		raw[4] = (unsigned char)(shown >> 8);
+		raw[5] = (unsigned char)shown;
+	}
+	memcpy(raw + 6, key, 32);
+	if (!share_b64_encode(raw, 38, encoded, (int)sizeof(encoded)))
+		return;
+	snprintf(next, sizeof(next), "%s.%s", p2p.invite, encoded);
+	if (!strcmp(next, p2p.share))
+		return;
+	snprintf(p2p.share, sizeof(p2p.share), "%s", next);
+	memcpy(p2p.clipboard, p2p.share, sizeof(p2p.clipboard));
+	p2p.has_clipboard = 1;
+	secret = p2p.share + strlen("halo://join/");
+	if (strlen(secret) >= 128)
+		secret = p2p.invite + strlen("halo://join/");
+	p2p_discord_set_hosting(secret, p2p.reported_player_count > 0 ? p2p.reported_player_count : 1,
+		p2p.reported_player_maximum > 0 ? p2p.reported_player_maximum : 1);
+	platform_log("Internet play: the invite names this machine's address and public key: %s", p2p.share);
+}
+
 /* the host's key hash and the token in an invite link or code within text:
 1 if it holds one, -1 if it holds an older version's (with the host's
 identifier alone, which a key made to have it could pass for), else 0 */
@@ -2614,6 +2833,13 @@ static int parse_invite(const char *text, unsigned char *host_hash, unsigned cha
 			start++;
 		for (search = start; hex_value(*search) >= 0; search++)
 			;
+		/* Discord carries the hex and the address suffix, without halo://join/. */
+		if (*search == '.')
+		{
+			search++;
+			while (share_b64_value((unsigned char)*search) >= 0)
+				search++;
+		}
 		for (; *search; search++)
 		{
 			if (*search != ' ' && *search != '\t' && *search != '\r' && *search != '\n')
@@ -2631,6 +2857,61 @@ static int parse_invite(const char *text, unsigned char *host_hash, unsigned cha
 	memcpy(host_hash, bytes, P2P_KEY_HASH_SIZE);
 	memcpy(token, bytes + P2P_KEY_HASH_SIZE, P2P_TOKEN_SIZE);
 	return 1;
+}
+
+/* the address and public mesh key after the invite's hex, when the link has them */
+static int parse_dial(const char *text, unsigned long *address, unsigned short *port, unsigned char key[32])
+{
+	const char *start = NULL;
+	const char *search;
+	unsigned char raw[38];
+	int index;
+
+	if (!text || !address || !port || !key)
+		return 0;
+	for (search = text; *search && !start; search++)
+	{
+		static const char *const prefixes[] = { "halo://join/", "?join=", "&join=" };
+		int prefix;
+
+		for (prefix = 0; prefix < (int)(sizeof(prefixes) / sizeof(*prefixes)) && !start; prefix++)
+		{
+			int length;
+
+			for (length = 0; prefixes[prefix][length] && search[length] &&
+				(search[length] | 0x20) == prefixes[prefix][length]; length++)
+				;
+			if (!prefixes[prefix][length])
+				start = search + length;
+		}
+	}
+	if (!start)
+		start = text;
+	for (index = 0; index < 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE); index++)
+	{
+		if (hex_value(start[index]) < 0)
+			return 0;
+	}
+	if (start[index] != '.')
+		return 0;
+	if (!share_b64_decode(start + index + 1, raw, (int)sizeof(raw)))
+		return 0;
+	*address = network_long(((unsigned long)raw[0] << 24) | ((unsigned long)raw[1] << 16) |
+		((unsigned long)raw[2] << 8) | raw[3]);
+	*port = network_short((unsigned short)((raw[4] << 8) | raw[5]));
+	memcpy(key, raw + 6, 32);
+	return *address && *port;
+}
+
+int p2p_invite_reach(const char *text)
+{
+	unsigned long address = 0;
+	unsigned short port = 0;
+	unsigned char key[32];
+
+	if (!parse_dial(text, &address, &port, key))
+		return 0;
+	return p2p_address_private(address) ? 1 : 2;
 }
 
 /* the host of the public game this machine joined from the server browser
@@ -2685,11 +2966,31 @@ static int join_invite(const char *text)
 	}
 	if ((p2p.joining || p2p.join_requested) && !memcmp(hash, p2p.join_host_hash, sizeof(hash)) &&
 		!memcmp(token, p2p.join_token, sizeof(token)))
+	{
+		unsigned long address = 0;
+		unsigned short port = 0;
+		unsigned char mesh_key[32];
+
+		/* a later copy of this invite can name a public address the first
+		one did not have yet. a private address does not replace a public one. */
+		if (parse_dial(text, &address, &port, mesh_key))
+			p2p_signal_set_direct(address, port, hash, mesh_key);
 		return 1;
+	}
 	memcpy(p2p.join_host, host, sizeof(host));
 	memcpy(p2p.join_host_hash, hash, sizeof(hash));
 	memcpy(p2p.join_token, token, sizeof(token));
 	p2p.join_requested = 1;
+	{
+		unsigned long address = 0;
+		unsigned short port = 0;
+		unsigned char mesh_key[32];
+
+		if (parse_dial(text, &address, &port, mesh_key))
+			p2p_signal_set_direct(address, port, hash, mesh_key);
+		else
+			p2p_signal_set_direct(0, 0, NULL, NULL);
+	}
 	return 1;
 }
 
@@ -2856,6 +3157,7 @@ static void make_invite(void)
 	posix_random_bytes(p2p.token, sizeof(p2p.token));
 	p2p.has_token = 1;
 	p2p.token_listed = 0;
+	p2p.share[0] = 0;
 	p2p_key_hash(p2p_public_key(), bytes);
 	memcpy(bytes + P2P_KEY_HASH_SIZE, p2p.token, P2P_TOKEN_SIZE);
 	p2p_hex(bytes, sizeof(bytes), text);
@@ -2872,7 +3174,7 @@ void p2p_new_invite_if_listed(void)
 	if (p2p.hosting)
 	{
 		p2p_signal_host(p2p.token);
-		memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
+		snprintf(p2p.clipboard, sizeof(p2p.clipboard), "%s", p2p.share[0] ? p2p.share : p2p.invite);
 		p2p.has_clipboard = 1;
 		/* (Discord is told the new one) */
 		p2p.reported_player_count = -1;
@@ -2901,8 +3203,9 @@ static void update_hosting(void)
 		p2p.stun_started = 1;
 		p2p_signal_start();
 		p2p_signal_host(p2p.token);
+		refresh_share_link();
 		platform_log("Internet play: hosting. Invite players with this link (it only works while this "
-			"copy of the game runs): %s", p2p.invite);
+			"copy of the game runs): %s", p2p.share[0] ? p2p.share : p2p.invite);
 		p2p.reported_player_count = -1;
 	}
 	else if (!want && p2p.hosting)
@@ -2915,12 +3218,14 @@ static void update_hosting(void)
 	{
 		int count, maximum;
 
+		refresh_share_link();
+
 		hosted_player_counts(&count, &maximum);
 		if (count != p2p.reported_player_count || maximum != p2p.reported_player_maximum)
 		{
 			p2p.reported_player_count = count;
 			p2p.reported_player_maximum = maximum;
-			p2p_discord_set_hosting(p2p.invite + strlen("halo://join/"), count, maximum);
+			p2p_discord_set_hosting((p2p.share[0] ? p2p.share : p2p.invite) + strlen("halo://join/"), count, maximum);
 		}
 	}
 }
@@ -3039,7 +3344,7 @@ int p2p_invite_link(char *link, int size)
 
 	pthread_mutex_lock(&p2p_lock);
 	hosting = p2p.hosting && p2p.has_token;
-	snprintf(link, (size_t)size, "%s", hosting ? p2p.invite : "");
+	snprintf(link, (size_t)size, "%s", hosting ? (p2p.share[0] ? p2p.share : p2p.invite) : "");
 	pthread_mutex_unlock(&p2p_lock);
 	return hosting;
 }
@@ -3241,7 +3546,7 @@ static void update_upnp(void)
 
 const char *p2p_take_clipboard_text(void)
 {
-	static char text[P2P_LINK_SIZE];
+	static char text[160];
 	const char *result = NULL;
 
 	if (!p2p.running)
@@ -3438,7 +3743,7 @@ static void *p2p_thread(void *unused)
 	pthread_mutex_lock(&p2p_lock);
 #ifndef HALO_ANDROID
 	/* (here: it may wait for a program) */
-	p2p_register_url_scheme("halo", "OpenCE invite");
+	p2p_register_url_scheme("halo", "MeshCE invite");
 #endif
 	for (;;)
 	{

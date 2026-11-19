@@ -10,7 +10,8 @@ whose keys the stick moves through and A types, a tap types (the
 touchscreen), and the controller then drives nothing else (xinput_sdl.c's
 halo_chat_pad_buttons, halo_chat_taps). The lines are
 drawn above the motion sensor, each with its player's name in their team's
-colour, the host's name white, wrapped to a column a little over half the view wide, and fade after a
+colour, the host's name white, and the Mesh ID in smaller characters after
+the gamertag, wrapped to a column a little over half the view wide, and fade after a
 while; where the touch controls hold the bottom left (Android, and a browser
 whose touch controls are used), they go at the top left under the weapon's
 panel, the newest highest. Each local player's view shows the lines that
@@ -75,6 +76,7 @@ mutes.
 #include "rasterizer/rasterizer.h"
 #include "render/render.h"
 #include "text/draw_string.h"
+#include "rank_result.h"
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "tag_files/tag_groups.h"
@@ -83,6 +85,7 @@ mutes.
 #include "network_voice.h"
 #include "network_chat.h"
 #include "text_filter.h"
+#include "../src/matchmaking.h"
 #include "halo_keyboard.h"
 
 #include <stdio.h>
@@ -287,6 +290,9 @@ struct chat_line
 	short hearers;
 	/* (system_milliseconds) */
 	unsigned long time;
+	/* the sender's machine, and whether that install is this client */
+	char machine;
+	char ours;
 };
 
 /* ---------- globals */
@@ -1154,6 +1160,7 @@ static void chat_add_line(
 	struct player_datum *player = distributed_player(player_index);
 	struct chat_line *line;
 	char name[CHAT_NAME_SIZE];
+	short local_machine;
 
 	/* (nor one of a machine this player muted on the scoreboard: its voice
 	and its lines, here alone) */
@@ -1162,6 +1169,10 @@ static void chat_add_line(
 	if (!host_name)
 		host_name = chat_player_is_host(player);
 	line = chat_new_line(text);
+	local_machine = network_game_client_get_local_machine_index();
+	line->machine = player->network_player_data.machine_index;
+	line->ours = (char)(player->local_player_index != NONE ||
+		(local_machine != NONE && player->network_player_data.machine_index == (char)local_machine));
 	csmemcpy(line->name, player->name, chat_player_name_length(player) * sizeof(line->name[0]));
 	line->color = host_name ? _chat_color_host :
 		game_engine_has_teams() && player->team_index == 0 ? _chat_color_red : _chat_color_blue;
@@ -1508,6 +1519,21 @@ boolean network_chat_host_name_muted(
 	return index && chat_mute_find(chat_mutes, NUMBEROF(chat_mutes), ascii, system_milliseconds()) != NULL;
 }
 
+/* 2v2 and Ranked, while the match is playing. The carnage report keeps every channel. */
+static int chat_team_only(void)
+{
+	if (!game_in_progress() || (game_engine && game_engine_showing_postgame()))
+		return 0;
+	return matchmaking_comms_team();
+}
+
+static short chat_match_channel(short channel)
+{
+	if (chat_team_only())
+		return _chat_channel_team;
+	return channel;
+}
+
 void network_chat_handle_up(
 	long machine_index,
 	void const *entries,
@@ -1551,7 +1577,7 @@ void network_chat_handle_up(
 		chat_host_notice(machine_index, refused);
 		return;
 	}
-	chat_host_send(line.player_index, chat_channel_from_flags(line.flags), text);
+	chat_host_send(line.player_index, chat_match_channel(chat_channel_from_flags(line.flags)), text);
 }
 
 word network_chat_line_entry_size(
@@ -1628,6 +1654,7 @@ static void chat_send(
 		chat_add_notice(refused);
 		return;
 	}
+	channel = chat_match_channel(channel);
 	if (chat_host())
 	{
 		chat_host_send(player_index, channel, text);
@@ -1751,9 +1778,9 @@ static void chat_keyboard_update(
 		chat_input_end();
 		return;
 	}
-	if (TEST_FLAG(pressed, HALO_CHAT_PAD_UP))
+	if (!chat_team_only() && TEST_FLAG(pressed, HALO_CHAT_PAD_UP))
 		chat_input.channel = (short)((chat_input.channel + NUMBER_OF_CHAT_CHANNELS - 1) % NUMBER_OF_CHAT_CHANNELS);
-	if (TEST_FLAG(pressed, HALO_CHAT_PAD_DOWN))
+	if (!chat_team_only() && TEST_FLAG(pressed, HALO_CHAT_PAD_DOWN))
 		chat_input.channel = (short)((chat_input.channel + 1) % NUMBER_OF_CHAT_CHANNELS);
 	/* (a direction pressed moves the key at once, held, again after a while
 	and then quickly) */
@@ -1896,10 +1923,11 @@ void network_chat_update(
 				}
 			}
 			else if (pressed)
-				chat_input_begin(TEST_FLAG(pressed, HALO_KEYBOARD_CHAT) ? _chat_channel_everyone : _chat_channel_team);
+				chat_input_begin(chat_match_channel(TEST_FLAG(pressed, HALO_KEYBOARD_CHAT) ?
+					_chat_channel_everyone : _chat_channel_team));
 			else
 			{
-				chat_input_begin(_chat_channel_everyone);
+				chat_input_begin(chat_match_channel(_chat_channel_everyone));
 				chat_keyboard.open = TRUE;
 				error(_error_log, "chat: the on-screen keyboard opened");
 				chat_keyboard.row = 1;
@@ -1931,7 +1959,8 @@ void network_chat_update(
 			break;
 		/* (to everyone, the team, the vehicle, in turn) */
 		case _key_tab:
-			chat_input.channel = (short)((chat_input.channel + 1) % NUMBER_OF_CHAT_CHANNELS);
+			if (!chat_team_only())
+				chat_input.channel = (short)((chat_input.channel + 1) % NUMBER_OF_CHAT_CHANNELS);
 			break;
 		case _key_backspace:
 			chat_input_delete();
@@ -2175,18 +2204,32 @@ static void chat_line_layout(
 	short right,
 	short line_height,
 	wchar_t const *name,
+	wchar_t const *suffix,
+	int machine,
+	int local_install,
 	wchar_t const *text,
 	struct chat_layout *layout)
 {
 	rectangle2d measure;
 	short start = 0;
 	short width;
+	short extra;
+	wchar_t id[10];
 
 	measure.x0 = 0;
 	measure.y0 = 0;
 	measure.x1 = SHORT_MAX;
 	measure.y1 = SHORT_MAX;
-	layout->text_left = name[0] ? (short)(left + chat_string_width(&measure, name, NONE) + line_height / 4) : left;
+	extra = 0;
+	if (name && name[0])
+	{
+		extra = (short)(line_height / 4);
+		if (rank_mesh_id_text(machine, local_install, id))
+			extra = (short)(extra + (chat_string_width(&measure, id, NONE) * 62) / 100 + 10);
+		if (suffix && suffix[0])
+			extra = (short)(extra + chat_string_width(&measure, suffix, NONE));
+	}
+	layout->text_left = name && name[0] ? (short)(left + chat_string_width(&measure, name, NONE) + extra) : left;
 	width = (short)(right - layout->text_left);
 	layout->rows = 0;
 	while (text[start] && layout->rows < CHAT_LINE_ROWS)
@@ -2216,6 +2259,9 @@ static void chat_draw_row(
 	long font_index,
 	rectangle2d const *bounds,
 	wchar_t const *name,
+	wchar_t const *suffix,
+	int machine,
+	int local_install,
 	real_argb_color const *name_color,
 	wchar_t const *text,
 	short text_left,
@@ -2223,6 +2269,7 @@ static void chat_draw_row(
 	real alpha)
 {
 	rectangle2d text_bounds = *bounds;
+	short suffix_x = 0;
 
 	text_bounds.x0 = text_left;
 	/* (the text's own shadow drawn clear: a colour of no alpha that is not
@@ -2236,6 +2283,16 @@ static void chat_draw_row(
 	{
 		draw_string_set_draw_mode(font_index, NONE, 0 /* left */, 0, name_color);
 		rasterizer_draw_unicode_string(bounds, NULL, NULL, 0, name);
+		suffix_x = rank_draw_name_tail(bounds, name, machine, local_install, font_index, name_color, 0);
+	}
+	if (name && name[0] && suffix && suffix[0])
+	{
+		rectangle2d suffix_bounds = *bounds;
+
+		suffix_bounds.x0 = suffix_x;
+		chat_draw_shadow(font_index, &suffix_bounds, suffix, alpha);
+		draw_string_set_draw_mode(font_index, NONE, 0 /* left */, 0, name_color);
+		rasterizer_draw_unicode_string(&suffix_bounds, NULL, NULL, 0, suffix);
 	}
 	if (text[0])
 	{
@@ -2254,6 +2311,9 @@ static void chat_draw_layout(
 	short top,
 	short line_height,
 	wchar_t const *name,
+	wchar_t const *suffix,
+	int machine,
+	int local_install,
 	real_argb_color const *name_color,
 	wchar_t const *text,
 	real_argb_color const *text_color,
@@ -2274,7 +2334,8 @@ static void chat_draw_layout(
 		bounds.x1 = right;
 		bounds.y0 = (short)(top + row * line_height);
 		bounds.y1 = (short)(bounds.y0 + line_height);
-		chat_draw_row(font_index, &bounds, row ? NULL : name, name_color, part, layout->text_left, text_color, alpha);
+		chat_draw_row(font_index, &bounds, row ? NULL : name, row ? NULL : suffix, machine, local_install,
+			name_color, part, layout->text_left, text_color, alpha);
 	}
 }
 
@@ -2309,23 +2370,34 @@ static void chat_filter_shown(
 	string[index] = 0;
 }
 
-/* a line's name as drawn: "Name:", "Name (team):" or "Name (vehicle):" */
+/* a line's gamertag, without the channel's suffix */
 static void chat_line_name(
 	struct chat_line const *line,
 	wchar_t *name,
 	short size)
 {
-	wchar_t const *suffix = line->channel == _chat_channel_team ? L" (team):" :
-		line->channel == _chat_channel_vehicle ? L" (vehicle):" : L":";
 	wchar_t const *player_name = line->name;
 	short length = 0;
 	short index;
 
 	for (index = 0; index < CHAT_NAME_SIZE && player_name[index] && length < size - 1; index++)
 		name[length++] = player_name[index];
-	for (index = 0; suffix[index] && length < size - 1; index++)
-		name[length++] = suffix[index];
 	name[length] = 0;
+}
+
+/* what follows the Mesh ID: ":", " (team):" or " (vehicle):" */
+static void chat_line_suffix(
+	struct chat_line const *line,
+	wchar_t *suffix,
+	short size)
+{
+	wchar_t const *text = line->channel == _chat_channel_team ? L" (team):" :
+		line->channel == _chat_channel_vehicle ? L" (vehicle):" : L":";
+	short index;
+
+	for (index = 0; text[index] && index < size - 1; index++)
+		suffix[index] = text[index];
+	suffix[index] = 0;
 }
 
 /* the on-screen keyboard, at the window's bottom right (with the touch
@@ -2500,7 +2572,7 @@ void network_chat_draw(
 		/* (what the player types is measured and drawn as it is: text_filter.c) */
 		text_filter_suspend();
 		/* (one row: its end, with the caret, where the whole is wider) */
-		chat_line_layout(left, SHORT_MAX, line_height, prompt, text, &layout);
+		chat_line_layout(left, SHORT_MAX, line_height, prompt, NULL, -1, 0, text, &layout);
 		{
 			rectangle2d measure;
 			short width = (short)(right - layout.text_left);
@@ -2524,7 +2596,7 @@ void network_chat_draw(
 		layout.starts[0] = start;
 		layout.lengths[0] = (short)(length + 1 - start);
 		chat_draw_layout(font_index, &layout, left, right, touch ? edge : (short)(edge - line_height), line_height,
-			prompt, &color, text, &text_color, 1.0f);
+			prompt, NULL, -1, 0, &color, text, &text_color, 1.0f);
 		text_filter_resume();
 		edge = (short)(edge + (touch ? line_height : -line_height));
 		rows--;
@@ -2538,9 +2610,11 @@ void network_chat_draw(
 		real alpha = chat_line_alpha(now - line->time, typing);
 		/* (a name and its " (vehicle):" fit as a notice's text does) */
 		wchar_t name[CHAT_TEXT_SIZE];
+		wchar_t suffix[24];
 		wchar_t text[CHAT_TEXT_SIZE];
 		real_argb_color color;
 		struct chat_layout layout;
+		int local_install;
 
 		/* (the older ones have faded too) */
 		if (alpha <= 0.0f)
@@ -2551,6 +2625,8 @@ void network_chat_draw(
 		/* (a notice's text alone, in its colour) */
 		chat_color(line->color, alpha, &color);
 		chat_line_text(line->text, text, NUMBEROF(text));
+		suffix[0] = 0;
+		local_install = 0;
 		if (line->color == _chat_color_notice)
 		{
 			name[0] = 0;
@@ -2559,15 +2635,18 @@ void network_chat_draw(
 		else
 		{
 			chat_line_name(line, name, NUMBEROF(name));
+			chat_line_suffix(line, suffix, NUMBEROF(suffix));
 			chat_text_color(alpha, &text_color);
+			local_install = line->ours ? 1 : 0;
 		}
 		/* (streamer mode's words hidden in the whole line, which is then
 		measured and drawn as it is) */
 		chat_filter_shown(name, NUMBEROF(name));
+		chat_filter_shown(suffix, NUMBEROF(suffix));
 		chat_filter_shown(text, NUMBEROF(text));
 		text_filter_suspend();
 		draw_string_set_draw_mode(font_index, NONE, 0 /* left */, 0, &color);
-		chat_line_layout(left, right, line_height, name, text, &layout);
+		chat_line_layout(left, right, line_height, name, suffix, (int)line->machine, local_install, text, &layout);
 		/* (the newest rows first: an older line that does not fit is not shown) */
 		if (layout.rows > rows)
 		{
@@ -2575,7 +2654,7 @@ void network_chat_draw(
 			break;
 		}
 		chat_draw_layout(font_index, &layout, left, right, touch ? edge : (short)(edge - layout.rows * line_height),
-			line_height, name, &color, text, &text_color, alpha);
+			line_height, name, suffix, (int)line->machine, local_install, &color, text, &text_color, alpha);
 		text_filter_resume();
 		edge = (short)(edge + (touch ? 1 : -1) * layout.rows * line_height);
 		rows = (short)(rows - layout.rows);

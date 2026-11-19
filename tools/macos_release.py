@@ -55,7 +55,7 @@ def audit_bundle(app):
     if {path.name for path in contents.iterdir()} - allowed:
         raise RuntimeError("Unexpected top-level content in the app")
     resources = contents / "Resources"
-    if {path.name for path in resources.iterdir()} - {"AppIcon.icns", "Helmet.pdf", "halo_guest.elf", "BuildInfo.txt", "Licenses", "map-downloads.json", "ContentTools.json", "brokers.txt", "opening_frames.bin"}:
+    if {path.name for path in resources.iterdir()} - {"AppIcon.icns", "Helmet.pdf", "halo_guest.elf", "BuildInfo.txt", "Licenses", "map-downloads.json", "ContentTools.json", "opening_frames.bin"}:
         raise RuntimeError("Release resources must contain only the compiled engine, icons, build record and licenses")
     helpers = contents / "Helpers"
     provenance = resources / "ContentTools.json"
@@ -147,7 +147,7 @@ def local_dmg(args):
     run("codesign", "--verify", "--deep", "--strict", app)
     with (app / "Contents/Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
-    destination = args.output or ROOT / "build/macos" / ("OpenCE-" + info["CFBundleShortVersionString"] + "-local.dmg")
+    destination = args.output or ROOT / "build/macos" / ("MeshCE-" + info["CFBundleShortVersionString"] + "-local.dmg")
     create_dmg(app, destination.resolve())
     print("Local test DMG (not notarized or approved for public distribution): " + str(destination))
 
@@ -182,7 +182,7 @@ def build_release(args):
     app_notary = notarize(app_zip, args.notary_profile)
     run("xcrun", "stapler", "staple", APP)
     run("spctl", "--assess", "--type", "execute", APP)
-    dmg = destination / ("OpenCE-" + args.version + ".dmg")
+    dmg = destination / ("MeshCE-" + args.version + ".dmg")
     create_dmg(APP, dmg)
     run("codesign", "--sign", args.sign_identity, "--timestamp", dmg)
     dmg_notary = notarize(dmg, args.notary_profile)
@@ -267,7 +267,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("setup-updates", help="Create Halo's separate Sparkle key in the login Keychain")
     local = commands.add_parser("local-dmg", help="Package a verified asset-free local app without hosting or Developer ID")
-    local.add_argument("--app", type=Path, default=APP, help="Existing signed OpenCE.app to package")
+    local.add_argument("--app", type=Path, default=APP, help="Existing signed MeshCE.app to package")
     local.add_argument("--output", type=Path)
     build = commands.add_parser("build")
     build.add_argument("--version", default=APP_VERSION)

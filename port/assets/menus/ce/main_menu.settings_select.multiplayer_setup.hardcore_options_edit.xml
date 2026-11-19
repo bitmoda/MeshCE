@@ -30,7 +30,7 @@
 	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/hardcore_kind" width="256" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_sm" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/hardcore_kind_spinner" x="9" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/hardcore_kind_spinner" type="spinner" width="238" height="18" flags="left_right_tabs_items" strings="MULTIPLAYER|CUSTOM MULTIPLAYER" font="ui\small_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 238 15 244">
+	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/hardcore_kind_spinner" type="spinner" width="238" height="18" flags="left_right_tabs_items" strings="MULTIPLAYER" font="ui\small_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 238 15 244">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/list_item_0" controller="1" width="390" height="20" bitmap="bitmaps/sel_list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" align="center" text_y="1">
@@ -657,10 +657,8 @@
 		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_invite" x="54" y="133"/>
 		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_listing" x="54" y="163"/>
 		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_text_chat" x="54" y="193"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_mods" x="54" y="223"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_password" x="54" y="253"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_map_share" x="54" y="283"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_game_rules" x="54" y="313"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_password" x="54" y="223"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_game_rules" x="54" y="253"/>
 		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/server_button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_server_name" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
@@ -717,16 +715,6 @@
 		<on event="created" run="port setting load"/>
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_mods" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
-		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/mods_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/server_mods_spinner" x="320" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/mods_label" type="text" controller="1" width="300" height="20" text="MODS" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="1">
-	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/server_mods_spinner" type="spinner" left="3" top="0" width="147" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ALLOWED|NOT ALLOWED" setting="network.mods_allowed" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="3 -6 15 0" footer_bounds="3 150 15 156">
-		<on event="created" run="port setting load"/>
-		<on event="left_mouse" run="mouse spinner 1wide click"/>
-	</widget>
 	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/op_password" width="512" height="20" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds_short" color="#FF2896FF">
 		<on event="a" run="ss edit server password"/>
 		<on event="start" run="ss edit server password"/>
@@ -766,14 +754,13 @@
 		<string text="The name the game shows in the lists of games.\nEnter changes it."/>
 		<string text="The most players the game takes (up to 128)."/>
 		<string text="Players join this game by its invite link.\nEnter copies the link."/>
-		<string text="Anyone can see and join your game: it is listed\nin everyone's Server Browser."/>
+		<string text="Players join this game with your invite link."/>
 		<string text="Only players with your invite link can join."/>
-		<string text="Players from the Server Browser must type it to\njoin. Enter sets it."/>
+		<string text="Invite links join this game without it.\nEnter sets it."/>
 		<string text="Sending players who join without the map the map."/>
 		<string text="Slayer, CTF, oddball or crazy king, and the\nhardcore rules."/>
 		<string text="Text chat for this game. A public listed game stays off."/>
 		<string text="Text chat is off while this game is public."/>
-		<string text="Players may play mods, or this game uses the map's own tags.\nA player whose game cannot turn mods off is dropped."/>
 	</strings>
 	<widget name="main_menu/settings_select/multiplayer_setup/hardcore_options_edit/server_button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<data input="common button bar update"/>

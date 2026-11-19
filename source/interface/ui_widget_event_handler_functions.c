@@ -2870,8 +2870,10 @@ static boolean multiplayer_game_swap_teams(
 	/* a party combined with another joins that invite from this press */
 	if (menu_matchmaking_rejoin(widget, widget_deleted))
 		return TRUE;
-	/* matchmaking assigns the teams. a switch from this lobby is not sent. */
-	if (matchmaking_queue_active())
+	/* matchmaking assigns the teams. a switch from this lobby is not sent.
+	after a match the queue is stopped on everyone but the host, and the
+	port is what still marks that lobby. */
+	if (matchmaking_queue_active() || matchmaking_game_port())
 		return TRUE;
 	game = network_game_get_game();
 	if (game && game->variant.universal_variant.teams == TRUE)

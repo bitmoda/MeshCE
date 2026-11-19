@@ -5,8 +5,8 @@ The event handler functions the menus written in XML can run besides the
 game's (menu_tags.c names them; ui_widget_event_handler_function_invoke
 calls them from PC_MENU_FUNCTION_BASE on):
 
-- "port quit game" (and the PC version's "main menu quit game") quits, as
-  closing the window does;
+- "port quit game" (and the PC version's "main menu quit game") closes the
+  quit question, so the main menu is showing, and then hides the window;
 - the PC version's "profile set edit begin" begins editing the first player
   profile, as its settings screens need, and fails with none: the main
   menu's then asks for a new one's name, as the menu's other items do, and
@@ -103,11 +103,16 @@ their handlers open opens.
 #include "custom_edition_maps.h"
 #include "halo_custom_maps.h"
 #include "network_voice.h"
+#include "network_votekick.h"
 #include "text/draw_string.h"
+#include "rasterizer/rasterizer.h"
+#include "rank_result.h"
 /* (internet play's server browser: the platform layer's) */
 #include "../src/p2p.h"
 #include "../src/matchmaking.h"
 #include "../src/rank_account.h"
+#include "../src/mesh_service.h"
+#include "peer_mesh.h"
 #include "text_filter.h"
 
 #include <stdio.h>
@@ -1277,10 +1282,6 @@ static short profile_description_index(char const *name)
 		return 7;
 	if (!strcmp(name, "about_item"))
 		return 8;
-	/* Mods sits before About. Its card is the profile list's own index, not
-	its place among the children. */
-	if (!strcmp(name, "mods_profile_item"))
-		return 9;
 	return NONE;
 }
 
@@ -1316,7 +1317,7 @@ static void profile_rows_apply(struct widget_instance *list)
 	static char const *const machine[] =
 	{
 		"controller_setup_profile_item", "mouse_settings_profile_item", "audio_settings_profile_item",
-		"video_settings_profile_item", "network_settings_profile_item", "mods_profile_item", "about_item"
+		"video_settings_profile_item", "network_settings_profile_item", "about_item"
 	};
 	static char const *const profile[] =
 	{
@@ -1898,18 +1899,13 @@ static short map_kind_shown(struct widget_instance *list, boolean singleplayer, 
 	struct widget_instance *spinner = named(list, "list_item_0_map_kind_spinner", 0);
 	short kind;
 
+	(void)previous;
 	if (!spinner)
 		return singleplayer ? MAP_KIND_SINGLEPLAYER : MAP_KIND_MULTIPLAYER;
-	kind = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_MAP_KINDS - 1);
-	if (!singleplayer && map_kind_singleplayer(kind))
-	{
-		short step = kind == (previous + NUMBER_OF_MAP_KINDS - 1) % NUMBER_OF_MAP_KINDS ? -1 : 1;
-
-		do
-			kind = (short)((kind + step + NUMBER_OF_MAP_KINDS) % NUMBER_OF_MAP_KINDS);
-		while (map_kind_singleplayer(kind));
-		spinner->parameters.list.selected_index = kind;
-	}
+	kind = (short)PIN(spinner->parameters.list.selected_index, 0, MAP_KIND_MULTIPLAYER);
+	if (!singleplayer)
+		kind = MAP_KIND_MULTIPLAYER;
+	spinner->parameters.list.selected_index = kind;
 	return kind;
 }
 
@@ -2472,6 +2468,17 @@ static void settings_help(struct widget_instance *list)
 	short index = 0;
 
 	sensitivity_follow_focus(list);
+	{
+		struct widget_instance *campaign_hud = named(list, "op_campaign_hud", 0);
+
+		visible_set(campaign_hud, FALSE);
+		if (campaign_hud)
+		{
+			campaign_hud->disabled = TRUE;
+			if (list->focused_child == campaign_hud)
+				focus_row(list, 0);
+		}
+	}
 	if (!help)
 		return;
 	if (row && row->child && row->child->type == 1 && strncmp(row->name, "button", 6))
@@ -3678,453 +3685,6 @@ static void controls_update(struct widget_instance *list)
 	}
 }
 
-/* ---------- Mods (Settings' row: tools/port_settings.py's _mods), laid
-out as the lobby is: the mods folder's mods, a row each (op_mod_<n>), as a
-resource pack list is, the one that plays over the others at the top (the
-load order upside down: the mod loaded last first), turned on or off and
-moved up or down there, and in the frame beside them the mod chosen's
-details; OK keeps it (port/linux/src/port_mods.c's load_order.toml) and
-plays them on the map now (mods.c), Cancel forgets it */
-
-#define MOD_ROWS 11
-#define MOD_DETAILS_LENGTH 1024
-/* the details' lines: as many as fit down the frame */
-#define MOD_DETAILS_LINES 13
-/* (from the shadow of each box's last character) */
-#define MOD_TEXT_MARGIN 8
-
-/* the text boxes whose lines are measured: the details' mod name and the
-rest, and the rows' names */
-enum
-{
-	_mod_details_name,
-	_mod_details_text,
-	_mod_row_name,
-	NUMBER_OF_MOD_TEXT_BOXES
-};
-
-/* the text boxes' names, and as many characters as fit across each until
-it has been drawn, and its font is known */
-static char const *const mod_text_box_names[NUMBER_OF_MOD_TEXT_BOXES] = { "mod_details_name", "mod_details_text",
-	"mod_name" };
-static short const mod_text_box_characters[NUMBER_OF_MOD_TEXT_BOXES] = { 17, 30, 24 };
-
-/* (port/linux/src/port_mods.c, port_mods.h's) */
-enum
-{
-	_port_mod_fine,
-	_port_mod_out_of_order,
-	_port_mod_incompatible,
-	_port_mod_unplayable,
-};
-
-long port_mods_count(void);
-long port_mods_at(long position);
-char const *port_mods_name(long index);
-int port_mods_on(long index);
-int port_mods_status(long index, char *text, unsigned long size);
-int port_mods_details(long index, char *text, unsigned long size);
-long port_mods_move(long position, long places);
-void port_mods_turn(long index, int on);
-int port_mods_save(void);
-void port_mods_revert(void);
-/* (mods.c) */
-void mods_apply(void);
-
-static struct
-{
-	/* the place on the list (0 the top: the mod loaded last) of the first
-	row, and of the mod chosen last (MOVE UP and MOVE DOWN's, which take the
-	focus from the rows) */
-	short first;
-	short chosen;
-	/* the text boxes' fonts and widths as they were last drawn
-	(menu_functions_text_box_drawn), which their lines are measured in;
-	NONE before then */
-	long fonts[NUMBER_OF_MOD_TEXT_BOXES];
-	short widths[NUMBER_OF_MOD_TEXT_BOXES];
-	/* what the details show (they are wrapped again when it changes), and
-	the mod each row's name is of, in which font (NONE: none yet) */
-	char shown[128];
-	long row_mods[MOD_ROWS];
-	long row_fonts[MOD_ROWS];
-} mods_screen;
-
-/* the row (op_mod_<n>) a widget is or is in, else NULL */
-static struct widget_instance *mod_row(struct widget_instance *widget)
-{
-	for (; widget; widget = widget->parent)
-	{
-		if (!strncmp(widget->name, "op_mod_", 7))
-			return widget;
-	}
-	return NULL;
-}
-
-/* the place on the list of the mod on a row, else NONE */
-static short mod_row_place(struct widget_instance *row)
-{
-	short place = row ? (short)(mods_screen.first + atoi(row->name + 7) - 1) : NONE;
-
-	return place >= 0 && place < port_mods_count() ? place : NONE;
-}
-
-/* the mod at a place on the list (its place in the load order counted from
-the end), else NONE */
-static long mod_at_place(short place)
-{
-	long count = port_mods_count();
-
-	return place >= 0 && place < count ? port_mods_at(count - 1 - place) : NONE;
-}
-
-/* UTF-8 text (mod.toml's) as the menus' (a line break the game's \r\n; a
-character the menus' UTF-16 cannot hold, or a broken one, a ?) */
-static void mods_wide_text(char const *text, wchar_t *wide, short length)
-{
-	short index = 0;
-
-	while (*text && index < length - 2)
-	{
-		unsigned char first = (unsigned char)*text++;
-		unsigned long character = first;
-		short following = first >= 0xF0 ? 3 : first >= 0xE0 ? 2 : first >= 0xC0 ? 1 : 0;
-
-		if (first >= 0x80)
-		{
-			character = first & (0x3F >> following);
-			for (; following > 0 && ((unsigned char)*text & 0xC0) == 0x80; following--)
-				character = (character << 6) | ((unsigned char)*text++ & 0x3F);
-			if (following || first < 0xC0 || character > 0xFFFF)
-				character = '?';
-		}
-		if (character == '\n')
-			wide[index++] = '\r';
-		wide[index++] = (wchar_t)character;
-	}
-	wide[index] = 0;
-}
-
-/* the start of the UTF-8 character before `at` in text */
-static size_t mods_character_before(char const *text, size_t at)
-{
-	if (at > 0)
-		at--;
-	while (at > 0 && ((unsigned char)text[at] & 0xC0) == 0x80)
-		at--;
-	return at;
-}
-
-/* whether `count` bytes of text fit across a text box (box): measured in
-its font, from its left as it is drawn (leading spaces and all), else
-counted */
-static boolean mods_text_fits(short box, char const *text, size_t count)
-{
-	static real_argb_color const white = { 1.0f, 1.0f, 1.0f, 1.0f };
-	char part[MOD_DETAILS_LENGTH];
-	wchar_t wide[MOD_DETAILS_LENGTH];
-	rectangle2d bounds;
-	rectangle2d text_bounds;
-	rectangle2d cursor;
-
-	if (!count)
-		return TRUE;
-	if (mods_screen.fonts[box] == NONE)
-		return count <= (size_t)mod_text_box_characters[box];
-	if (count >= sizeof(part))
-		return FALSE;
-	memcpy(part, text, count);
-	part[count] = 0;
-	mods_wide_text(part, wide, NUMBEROF(wide));
-	bounds.x0 = 0;
-	bounds.y0 = 0;
-	bounds.x1 = 0x3FFF;
-	bounds.y1 = 480;
-	draw_string_set_draw_mode(mods_screen.fonts[box], NONE, 0, 0, &white);
-	draw_unicode_string_compute_bounds(&bounds, wide, &text_bounds, &cursor);
-	return MAX(text_bounds.x1, cursor.x0) - bounds.x0 <= mods_screen.widths[box] - MOD_TEXT_MARGIN;
-}
-
-/* `count` bytes of text, as much of them as fits across a text box (box)
-with "..." after it, into `shortened` */
-static void mods_text_shorten(short box, char const *text, size_t count, char *shortened, size_t size)
-{
-	size_t kept = count;
-
-	for (;;)
-	{
-		snprintf(shortened, size, "%.*s...", (int)kept, text);
-		if (!kept || mods_text_fits(box, shortened, strlen(shortened)))
-			return;
-		kept = mods_character_before(text, kept);
-	}
-}
-
-/* text, after what `wrapped` holds, in lines that fit across a text box
-(box), broken at spaces and at its own line breaks (word by word: a word
-too long for a line broken where it fits); `lines` lines in all at most,
-the last cut short with "..." when there is more: how many it holds now */
-static short mods_wrap(char const *text, char *wrapped, size_t size, short box, short lines, short line)
-{
-	size_t length = strlen(wrapped);
-
-	while (line < lines && *text)
-	{
-		char const *end = strchr(text, '\n');
-		size_t count = end ? (size_t)(end - text) : strlen(text);
-		size_t cut = 0;
-		boolean more;
-
-		for (;;)
-		{
-			size_t next = cut;
-
-			while (next < count && text[next] == ' ')
-				next++;
-			while (next < count && text[next] != ' ')
-				next++;
-			if (next == cut || !mods_text_fits(box, text, next))
-				break;
-			cut = next;
-		}
-		if (!cut && count)
-		{
-			for (cut = 0; cut < count && text[cut] == ' '; cut++)
-			{
-			}
-			while (cut < count && text[cut] != ' ')
-				cut++;
-			while (cut > 1 && !mods_text_fits(box, text, cut))
-				cut = mods_character_before(text, cut);
-			if (!cut)
-				cut = 1;
-		}
-		more = cut < count || (text[count] == '\n' && text[count + 1]);
-		if (line == lines - 1 && more)
-		{
-			char shortened[MOD_DETAILS_LENGTH];
-
-			mods_text_shorten(box, text, cut, shortened, sizeof(shortened));
-			snprintf(wrapped + length, size - length, "%s%s", length ? "\n" : "", shortened);
-			return lines;
-		}
-		snprintf(wrapped + length, size - length, "%s%.*s", length ? "\n" : "", (int)cut, text);
-		length = strlen(wrapped);
-		line++;
-		text += cut;
-		while (*text == ' ')
-			text++;
-		if (*text == '\n')
-			text++;
-	}
-	return line;
-}
-
-/* "port mods init" (the list's created), and "port mods close" (its
-deleted: what OK has not kept is forgotten) */
-static boolean mods_screen_reset(void)
-{
-	short index;
-
-	port_mods_revert();
-	mods_screen.first = 0;
-	mods_screen.chosen = 0;
-	mods_screen.shown[0] = 0;
-	for (index = 0; index < NUMBER_OF_MOD_TEXT_BOXES; index++)
-	{
-		mods_screen.fonts[index] = NONE;
-		mods_screen.widths[index] = 0;
-	}
-	for (index = 0; index < MOD_ROWS; index++)
-		mods_screen.row_mods[index] = NONE;
-	return TRUE;
-}
-
-/* "port mods toggle" (A on a row; a mod that cannot be played stays as it
-is, so that it is still off when it can be) */
-static boolean mods_toggle(struct widget_instance *widget)
-{
-	short place = mod_row_place(mod_row(widget));
-	long mod = mod_at_place(place);
-
-	if (place == NONE)
-		return FALSE;
-	if (port_mods_status(mod, NULL, 0) != _port_mod_unplayable)
-		port_mods_turn(mod, !port_mods_on(mod));
-	return TRUE;
-}
-
-/* "port mods move up" and "port mods move down" (left and right on a row,
-and the buttons): the mod of the row, else the one chosen last, moved one
-place on the list (up: later in the load order, over one more mod); the
-focus follows it on its row */
-static boolean mods_move(struct widget_instance *widget, short places)
-{
-	struct widget_instance *row = mod_row(widget);
-	short count = (short)port_mods_count();
-	short place = row ? mod_row_place(row) : mods_screen.chosen;
-	short moved;
-
-	/* (no mods: nothing to move) */
-	if (!count)
-		return TRUE;
-	if (place == NONE || place >= count)
-		return FALSE;
-	moved = (short)(count - 1 - port_mods_move(count - 1 - place, -places));
-	mods_screen.chosen = moved;
-	if (moved < mods_screen.first)
-		mods_screen.first = moved;
-	else if (moved >= mods_screen.first + MOD_ROWS)
-		mods_screen.first = (short)(moved - MOD_ROWS + 1);
-	if (row && row->parent)
-		focus_row(row->parent, (short)(moved - mods_screen.first));
-	return TRUE;
-}
-
-/* the details of the mod at `place` on the list, in the frame (the list's
-description): its name; what is wrong with it, beside its icon; whether it
-is on and its priority (1 the top, the mod that wins); and what its
-mod.toml says */
-static void mods_details_show(struct widget_instance *details, short place, short count)
-{
-	long mod = mod_at_place(place);
-	struct widget_instance *icon = named(details, "mod_details_status", 0);
-	char problem[MOD_DETAILS_LENGTH];
-	char about[MOD_DETAILS_LENGTH];
-	char text[MOD_DETAILS_LENGTH];
-	wchar_t wide[MOD_DETAILS_LENGTH];
-	int status;
-	short line;
-	char shown[sizeof(mods_screen.shown)];
-
-	/* (wrapped again only when what they show, or its fonts, change) */
-	snprintf(shown, sizeof(shown), "%ld %d %d %d %d %ld %d %ld %d", mod, port_mods_status(mod, NULL, 0),
-		port_mods_on(mod), place, count, mods_screen.fonts[_mod_details_name],
-		mods_screen.widths[_mod_details_name], mods_screen.fonts[_mod_details_text],
-		mods_screen.widths[_mod_details_text]);
-	if (!strcmp(shown, mods_screen.shown))
-		return;
-	strcpy(mods_screen.shown, shown);
-	if (mod < 0)
-	{
-		/* (no mods: where they go) */
-		mods_wide_text(count ? "" : "No mods", wide, NUMBEROF(wide));
-		text_set_length(named(details, "mod_details_name", 0), wide, NUMBEROF(wide));
-		text[0] = 0;
-		if (!count)
-		{
-			mods_wrap("Each mod is a folder of its own in the mods folder, beside the maps folder.", text,
-				sizeof(text), _mod_details_text, MOD_DETAILS_LINES, 0);
-		}
-		mods_wide_text(text, wide, NUMBEROF(wide));
-		text_set_length(named(details, "mod_details_text", 0), wide, NUMBEROF(wide));
-		visible_set(icon, FALSE);
-		return;
-	}
-	status = port_mods_status(mod, problem, sizeof(problem));
-	text[0] = 0;
-	mods_wrap(port_mods_name(mod), text, sizeof(text), _mod_details_name, 2, 0);
-	mods_wide_text(text, wide, NUMBEROF(wide));
-	text_set_length(named(details, "mod_details_name", 0), wide, NUMBEROF(wide));
-	visible_set(icon, status != _port_mod_fine);
-	if (icon)
-		icon->animation.current_frame_index = status == _port_mod_out_of_order ? 1 : 2;
-	text[0] = 0;
-	line = 0;
-	if (status != _port_mod_fine)
-	{
-		/* (its first line indented, for the icon) */
-		snprintf(text, sizeof(text), "     %s", problem);
-		strcpy(problem, text);
-		text[0] = 0;
-		line = mods_wrap(problem, text, sizeof(text), _mod_details_text, MOD_DETAILS_LINES, line);
-		line = mods_wrap(" ", text, sizeof(text), _mod_details_text, MOD_DETAILS_LINES, line);
-	}
-	snprintf(about, sizeof(about), "%s\nPriority: %d of %d", status == _port_mod_unplayable ? "Cannot be played" :
-		port_mods_on(mod) ? "On" : "Off", place + 1, count);
-	line = mods_wrap(about, text, sizeof(text), _mod_details_text, MOD_DETAILS_LINES, line);
-	line = mods_wrap(" ", text, sizeof(text), _mod_details_text, MOD_DETAILS_LINES, line);
-	port_mods_details(mod, about, sizeof(about));
-	mods_wrap(about, text, sizeof(text), _mod_details_text, MOD_DETAILS_LINES, line);
-	mods_wide_text(text, wide, NUMBEROF(wide));
-	text_set_length(named(details, "mod_details_text", 0), wide, NUMBEROF(wide));
-}
-
-/* "port mods update": the rows (the list moving on at its ends while there
-are more mods past them), each mod's name (cut short where it is too long),
-ON or OFF and its icon (out of the order it asks for; another says it cannot
-be played with it, or it cannot be played), and the details of the mod
-chosen */
-static void mods_update(struct widget_instance *list)
-{
-	struct widget_instance *row;
-	struct widget_instance *focused = mod_row(list->focused_child);
-	short count = (short)port_mods_count();
-	short focused_index = focused ? (short)(atoi(focused->name + 7) - 1) : NONE;
-
-	menu_window_set(list, &mods_screen.first, count, MOD_ROWS, 0, FALSE);
-	if (mods_screen.first > 0 && mods_screen.first + MOD_ROWS > count)
-		mods_screen.first = (short)MAX(0, count - MOD_ROWS);
-	if (focused_index != NONE && mods_screen.first + focused_index < count)
-		mods_screen.chosen = (short)(mods_screen.first + focused_index);
-	for (row = list->child; row; row = row->next)
-	{
-		short place;
-		short row_index;
-		long mod;
-		struct widget_instance *icon;
-		int status;
-
-		if (strncmp(row->name, "op_mod_", 7))
-			continue;
-		/* (its background: the focused one's outlined frame, which the
-		engine shows only on a bitmap of two frames, as the browser's) */
-		row->animation.current_frame_index = row == focused ? 1 : 0;
-		place = mod_row_place(row);
-		row->visible = place != NONE;
-		if (place == NONE)
-		{
-			if (row == focused)
-				focus_row(list, count ? (short)(count - 1 - mods_screen.first) : NONE);
-			continue;
-		}
-		mod = mod_at_place(place);
-		status = port_mods_status(mod, NULL, 0);
-		row_index = (short)PIN(atoi(row->name + 7) - 1, 0, MOD_ROWS - 1);
-		if (mods_screen.row_mods[row_index] != mod ||
-			mods_screen.row_fonts[row_index] != mods_screen.fonts[_mod_row_name])
-		{
-			char const *name = port_mods_name(mod);
-			char shortened[MOD_DETAILS_LENGTH];
-			wchar_t wide[ROW_TEXT_LENGTH];
-
-			if (mods_text_fits(_mod_row_name, name, strlen(name)))
-				snprintf(shortened, sizeof(shortened), "%s", name);
-			else
-				mods_text_shorten(_mod_row_name, name, strlen(name), shortened, sizeof(shortened));
-			mods_wide_text(shortened, wide, ROW_TEXT_LENGTH);
-			text_set(named(row, "mod_name", 0), wide);
-			mods_screen.row_mods[row_index] = mod;
-			mods_screen.row_fonts[row_index] = mods_screen.fonts[_mod_row_name];
-		}
-		text_set(named(row, "mod_state", 0), port_mods_on(mod) ? L"ON" : L"OFF");
-		icon = named(row, "mod_status", 0);
-		visible_set(icon, status != _port_mod_fine);
-		if (icon)
-			icon->animation.current_frame_index = status == _port_mod_out_of_order ? 1 : 2;
-	}
-	mods_details_show(list->parameters.list.extended_description, count ? mods_screen.chosen : NONE, count);
-}
-
-/* "port mods save" (OK): kept, and played at once (port_mods_save keeps
-what it cannot write until the game quits) */
-static boolean mods_save(void)
-{
-	port_mods_save();
-	mods_apply();
-	return TRUE;
-}
-
 /* ---------- Multiplayer (port/assets/menus' PLAN: Create Game > Internet
 or LAN; Join Game > Server Browser (blank, for now), LAN, Direct Link): the
 Xbox's networking, run by the engine's port entry points
@@ -4229,6 +3789,7 @@ short network_game_client_get_state(void *client, short *state_data);
 struct network_game *network_game_client_get_game(void *client);
 struct network_game *network_game_server_get_game(void *server);
 short network_game_client_get_local_machine_index(void);
+short network_game_client_get_machine_index(void *client);
 boolean network_game_client_add_player(void *client, short local_player_index);
 boolean network_game_client_add_named_player(void *client, short controller_index,
 	wchar_t const *name, short color_index);
@@ -5194,8 +4755,6 @@ VOTING), PASSWORD's and MAP SHARING's (its help_strings, tools/port_settings.py)
 /* TEXT CHAT's help, then the line shown while LISTING is PUBLIC */
 #define TEXT_CHAT_HELP 16
 #define TEXT_CHAT_LOCKED_HELP 17
-/* MODS' help (tools/port_settings.py's server settings help_strings) */
-#define MODS_HELP 18
 
 /* co-op's EXTRA ENEMIES' choices (network.coop_enemies_mode's values, as
 gametype_options' coop_extra_enemies_spinner has them, in this order): its
@@ -5315,16 +4874,6 @@ static void server_text_chat_apply(struct widget_instance *list)
 		setting_save(spinner);
 }
 
-/* MODS on Server Setup and the hardcore server page (network.mods_allowed).
-Left and right write the choice the same way the mouse does. */
-static void server_mods_apply(struct widget_instance *list)
-{
-	struct widget_instance *spinner = named(list, "server_mods_spinner", 0);
-
-	if (spinner)
-		setting_save(spinner);
-}
-
 /* "server settings update" */
 static struct game_variant *edit_variant(void);
 
@@ -5332,7 +4881,7 @@ static void server_settings_update(struct widget_instance *list)
 {
 	struct widget_instance *spinner = named(list, "max_players_spinner", 0);
 	struct widget_instance *row = named(list, "op_server_name", 0);
-	char text[TEXT_FIELD_LENGTH];
+	char text[160];
 
 	if (spinner)
 		*server_settings_maximum_players_index() = (short)PIN(spinner->parameters.list.selected_index, 0,
@@ -5363,6 +4912,7 @@ static void server_settings_update(struct widget_instance *list)
 		(tools/port_settings.py's COOP_SETUP_SCREENS), each its help */
 		{
 			struct widget_instance *help = list->parameters.list.extended_description;
+			struct widget_instance *share_row = named(list, "op_map_share_options", 0);
 
 			visible_set(named(list, "op_coop_options", 0), cooperative);
 			visible_set(named(list, "op_voice_options", 0), cooperative);
@@ -5370,13 +4920,22 @@ static void server_settings_update(struct widget_instance *list)
 				help->parameters.text_box.string_list_index = COOPERATIVE_OPTIONS_HELP;
 			else if (help && list->focused_child == named(list, "op_voice_options", 0))
 				help->parameters.text_box.string_list_index = COOPERATIVE_VOICE_OPTIONS_HELP;
-			/* (MAP SHARING's, any game's: map_share.c) */
-			else if (help && list->focused_child == named(list, "op_map_share_options", 0))
+			else if (help && share_row && list->focused_child == share_row)
 				help->parameters.text_box.string_list_index = MAP_SHARE_OPTIONS_HELP;
 		}
 	}
-	/* LISTING (an internet game's): PUBLIC, listed in everyone's server
-	browser, or PRIVATE, for this game. Its help is its choice's */
+	{
+		struct widget_instance *share = named(list, "op_map_share_options", 0);
+
+		visible_set(share, FALSE);
+		if (share)
+		{
+			share->disabled = TRUE;
+			if (list->focused_child == share)
+				focus_row(list, 0);
+		}
+	}
+	/* LISTING (an internet game's): PUBLIC or PRIVATE. Its help is its choice's */
 	visible_set(named(list, "op_listing", 0), multiplayer.mode == _multiplayer_mode_host_internet &&
 		config_boolean("network.online") && config_boolean("network.public_lobby"));
 	if ((spinner = named(list, "listing_spinner", 0)) != NULL && named(list, "op_listing", 0) &&
@@ -5388,7 +4947,7 @@ static void server_settings_update(struct widget_instance *list)
 		server_settings_private_set(!public);
 		p2p_set_hosting_public(public);
 		if (help && list->focused_child == named(list, "op_listing", 0))
-			help->parameters.text_box.string_list_index = (short)(11 + spinner->parameters.list.selected_index);
+			help->parameters.text_box.string_list_index = (short)(10 + spinner->parameters.list.selected_index);
 	}
 	/* PASSWORD (a PUBLIC internet game's): its stars, NONE if it has none */
 	row = named(list, "op_password", 0);
@@ -5417,10 +4976,7 @@ static void server_settings_update(struct widget_instance *list)
 		if (help && list->focused_child == named(list, "op_text_chat", 0))
 			help->parameters.text_box.string_list_index =
 				(short)(p2p_hosting_listed() ? TEXT_CHAT_LOCKED_HELP : TEXT_CHAT_HELP);
-		else if (help && list->focused_child == named(list, "op_mods", 0))
-			help->parameters.text_box.string_list_index = MODS_HELP;
 	}
-	server_mods_apply(list);
 }
 
 static void server_password_done(char const *text)
@@ -5443,7 +4999,7 @@ static boolean server_password_edit(struct widget_instance *row)
 /* "ss edit server name" (its row's A: begins, or ends) */
 static boolean server_name_edit(struct widget_instance *row)
 {
-	char text[TEXT_FIELD_LENGTH];
+	char text[160];
 
 	if (text_field_editing(row))
 	{
@@ -5458,7 +5014,7 @@ static boolean server_name_edit(struct widget_instance *row)
 /* "ss copy invite" */
 static boolean invite_copy(void)
 {
-	char link[TEXT_FIELD_LENGTH];
+	char link[160];
 
 	if (!p2p_invite_link(link, sizeof(link)))
 		return campaign_fail();
@@ -5966,11 +5522,31 @@ static void rank_card_place(struct widget_instance *screen)
 	}
 }
 
+/* The install key is the Mesh ID. The profile copy can still be empty. */
+static void rank_shown_mesh_id(char *out, int size)
+{
+	unsigned char key[32];
+	char live[16];
+
+	if (!out || size < 1)
+		return;
+	out[0] = 0;
+	live[0] = 0;
+	if (peer_mesh_public(key))
+		mesh_identity(key, NULL, 0, NULL, 0, live, (int)sizeof(live));
+	if (live[0] == 'M')
+	{
+		snprintf(out, (size_t)size, "%s", live);
+		rank_account_remember_mesh(live);
+	}
+}
+
 static void rank_card_update(struct widget_instance *screen)
 {
 	struct rank_account account;
 	wchar_t text[ROW_TEXT_LENGTH];
 	char line[96];
+	char mesh_id[16];
 
 	rank_bind_shown();
 	if (config_boolean("network.online"))
@@ -5979,13 +5555,14 @@ static void rank_card_update(struct widget_instance *screen)
 		rank_register_kick();
 	}
 	rank_account_get(&account);
+	rank_shown_mesh_id(mesh_id, (int)sizeof(mesh_id));
 	rank_emblem_show(screen, &account);
 	rank_emblem_frame(screen, "rank_badge", rank_badge_index(account.games));
 	usnprintf(text, ROW_TEXT_LENGTH - 1, L"%d", account.level);
 	text[ROW_TEXT_LENGTH - 1] = 0;
 	label_set(named(screen, "rank_level", 0), text);
-	if (account.core[0])
-		snprintf(line, sizeof(line), "%s  %s", account.name[0] ? account.name : "Player", account.core);
+	if (mesh_id[0])
+		snprintf(line, sizeof(line), "%s  %s", account.name[0] ? account.name : "Player", mesh_id);
 	else
 		snprintf(line, sizeof(line), "%s", account.name[0] ? account.name : "Player");
 	rank_wtext(text, ROW_TEXT_LENGTH, line);
@@ -6000,6 +5577,7 @@ static void rank_id_update(struct widget_instance *screen)
 	struct widget_instance *desc;
 	struct widget_instance *focus;
 	wchar_t text[ROW_TEXT_LENGTH];
+	char mesh_id[16];
 	char const *focus_name;
 	int count;
 	int index;
@@ -6020,7 +5598,10 @@ static void rank_id_update(struct widget_instance *screen)
 	rank_emblem_show(screen, &account);
 	list = named(screen, "player_id_list", 0);
 	desc = list ? list->parameters.list.extended_description : NULL;
-	if (account.core[0])
+	rank_shown_mesh_id(mesh_id, (int)sizeof(mesh_id));
+	if (mesh_id[0])
+		rank_wtext(text, ROW_TEXT_LENGTH, mesh_id);
+	else if (account.core[0] == 'M')
 		rank_wtext(text, ROW_TEXT_LENGTH, account.core);
 	else
 		rank_wtext(text, ROW_TEXT_LENGTH, "pending");
@@ -6476,9 +6057,9 @@ static short browser_chosen_row(void)
 		row < BROWSER_ROWS ? row : NONE;
 }
 
-/* CCE FFA and CCE Hardcore, or the catalog name of that playlist. CCE FFA
-can be joined and shows its player count. CCE Hardcore stays in the list,
-shown full, and Join does not start. */
+/* CCE FFA, CCE Hardcore, and Ranked, or the catalog name of that playlist.
+CCE FFA can be joined and shows its player count. 2v2 and Ranked stay in
+the list, shown full, and Join does not start. */
 static int mm_browser_same(const char *left, const char *right)
 {
 	if (!left || !right)
@@ -6518,7 +6099,8 @@ static int mm_browser_kind(const struct p2p_listing *game)
 			continue;
 		if (!strcmp(catalog.playlist[index].id, "ffa"))
 			return 1;
-		if (!strcmp(catalog.playlist[index].id, "hardcore"))
+		if (!strcmp(catalog.playlist[index].id, "hardcore") ||
+			!strcmp(catalog.playlist[index].id, "ranked"))
 			return 2;
 	}
 	return 0;
@@ -7548,7 +7130,7 @@ static void browser_update(struct widget_instance *list)
 link on the clipboard reached, its game then in the list */
 static boolean direct_link_from_clipboard(void)
 {
-	char text[TEXT_FIELD_LENGTH];
+	char text[160];
 	char *link = text;
 	size_t length;
 
@@ -8741,19 +8323,29 @@ static boolean lobby_player_muted(struct network_player *player)
 
 /* a player row keeps who KICK and MUTE will use. The buttons remember that
 player once focus has moved onto the bar */
+static int lobby_player_local(struct network_player *player);
+
+/* another human. every player can vote to remove that machine. */
+static boolean lobby_action_votable(struct network_player *player)
+{
+	if (!player || !network_player_is_valid(player))
+		return FALSE;
+	if (bot_controller_is_bot(player->machine_index, player->controller_index))
+		return FALSE;
+	/* this install, including before the host is told its machine index. */
+	if (lobby_player_local(player))
+		return FALSE;
+	return TRUE;
+}
+
 static void lobby_action_track(struct widget_instance *list)
 {
 	struct network_player *row;
 
-	if (!lobby_is_host())
-	{
-		lobby_action_machine = NONE;
-		return;
-	}
 	row = lobby_focused_row(list);
 	if (row)
 	{
-		if (lobby_action_kickable(row))
+		if (lobby_action_votable(row) || lobby_action_kickable(row))
 		{
 			lobby_action_machine = (short)row->machine_index;
 			lobby_action_controller = (short)row->controller_index;
@@ -8778,12 +8370,14 @@ static void lobby_host_controls(struct widget_instance *list)
 
 	lobby_action_track(list);
 	player = lobby_action_find();
-	show_kick = lobby_action_kickable(player);
+	show_kick = lobby_action_votable(player) || lobby_action_kickable(player);
 	show_mute = lobby_action_mutable(player);
 	kick = named(list, "lobby_button_kick", 0);
 	mute = named(list, "lobby_button_mute", 0);
 	visible_set(kick, show_kick);
 	visible_set(mute, show_mute);
+	if (show_kick)
+		label_set(kick, lobby_action_votable(player) ? L"VOTE" : L"KICK");
 	if (show_mute)
 		label_set(mute, lobby_player_muted(player) ? L"UNMUTE" : L"MUTE");
 	if (kick)
@@ -8792,27 +8386,22 @@ static void lobby_host_controls(struct widget_instance *list)
 		mute->vertical_offset = 0;
 }
 
-/* "port lobby kick": the host drops the selected player's machine, or the
-bot seated on this one */
+/* "port lobby kick": a vote to remove the selected player. a bot on this
+machine is still removed by the host, since a bot cannot vote. */
 static boolean lobby_kick(void)
 {
 	struct network_player *player;
 	void *client;
 
-	if (!lobby_is_host())
-		return TRUE;
 	player = lobby_action_find();
-	if (!lobby_action_kickable(player))
-		return TRUE;
+	if (lobby_action_votable(player))
 	{
-		char ascii[12];
-		char account[48];
-
-		rank_ascii_name(ascii, (int)sizeof(ascii), player->name);
-		rank_account_for_name(ascii, account, (int)sizeof(account));
-		if (account[0])
-			rank_kick_add(account);
+		network_votekick_lobby_vote((short)player->machine_index);
+		lobby_action_machine = NONE;
+		return TRUE;
 	}
+	if (!lobby_is_host() || !lobby_action_kickable(player))
+		return TRUE;
 	if (bot_controller_is_bot(player->machine_index, player->controller_index))
 	{
 		client = global_network_game_client_get();
@@ -8822,8 +8411,6 @@ static boolean lobby_kick(void)
 			return TRUE;
 		bot_controller_clear((short)player->machine_index, (short)player->controller_index);
 	}
-	else if (!network_game_server_kick_machine_of_player(player->machine_index, FALSE))
-		return TRUE;
 	lobby_action_machine = NONE;
 	return TRUE;
 }
@@ -8871,12 +8458,131 @@ static void lobby_join_help(struct widget_instance *list)
 		text = L"Link copied.";
 	else if (lobby_join.reseat)
 		text = L"START sits a controller down. ENTER sits the keyboard and mouse.";
-	else if (named(list, "lobby_button_kick", 0) && lobby_action_kickable(player))
+	else if (named(list, "lobby_button_kick", 0) && lobby_action_votable(player))
 		text = lobby_action_mutable(player) ?
-			L"KICK removes them. MUTE stops their voice." : L"KICK removes them.";
+			L"VOTE asks the lobby to remove them. MUTE stops their voice." :
+			L"VOTE asks the lobby to remove them.";
+	else if (named(list, "lobby_button_kick", 0) && lobby_action_kickable(player))
+		text = L"KICK removes them.";
 	else if (lobby_local_player_count() < MAXIMUM_LOCAL_PLAYERS)
 		text = L"ADD PLAYER adds someone here.";
 	text_set(help, text);
+}
+
+/* this install, including the host's own row before the client is told its
+machine index. the Mesh ID is the install key, the same one the profile card
+shows, so the row does not wait for a peer packet. */
+static int lobby_player_local(struct network_player *player)
+{
+	void *client;
+	short nested;
+	short slot;
+	struct player_profile profile;
+
+	if (!player || bot_controller_is_bot(player->machine_index, player->controller_index))
+		return 0;
+	nested = network_game_client_get_local_machine_index();
+	if (nested != NONE && (int)player->machine_index == (int)nested)
+		return 1;
+	client = global_network_game_client_get();
+	if (client)
+	{
+		slot = network_game_client_get_machine_index(client);
+		if (slot != NONE && (int)player->machine_index == (int)slot)
+			return 1;
+	}
+	if (!global_network_game_server_get() ||
+		player->controller_index < 0 || player->controller_index >= MAXIMUM_LOCAL_PLAYERS)
+		return 0;
+	player_ui_get_active_player_profile((short)player->controller_index, &profile);
+	return profile.player_name[0] && !ustrcmp(profile.player_name, player->name);
+}
+
+static void lobby_name_ascii(char *ascii, int size, wchar_t const *name)
+{
+	int index;
+
+	if (!ascii || size < 1)
+		return;
+	ascii[0] = 0;
+	if (!name)
+		return;
+	index = 0;
+	while (index < size - 1 && index < 11 && name[index])
+	{
+		ascii[index] = name[index] >= 32 && name[index] < 127 ? (char)name[index] : '?';
+		index++;
+	}
+	ascii[index] = 0;
+}
+
+/* mesh id and score for this row. the local row is this install, the same
+pair the profile card shows. everyone else is the player the mesh already
+heard, including a friend who joined the invite. */
+static void lobby_player_marks(struct network_player *player, char *id, int id_size, int *level)
+{
+	char ascii[12];
+	struct rank_account account;
+
+	if (id && id_size > 0)
+		id[0] = 0;
+	if (level)
+		*level = -1;
+	if (!player)
+		return;
+	lobby_name_ascii(ascii, (int)sizeof(ascii), player->name);
+	if (lobby_player_local(player))
+	{
+		rank_shown_mesh_id(id, id_size);
+		rank_account_get(&account);
+		if (level)
+			*level = account.level < 0 ? 0 : account.level;
+		return;
+	}
+	{
+		unsigned long address = 0;
+
+		if (global_network_game_server_get() && player->machine_index >= 0)
+			address = network_game_server_machine_address((long)player->machine_index);
+		if (peer_mesh_player(ascii, (int)player->machine_index, id, id_size, level, address))
+			return;
+	}
+	if (level)
+	{
+		int card = matchmaking_card_level(ascii);
+
+		if (card < 0)
+			card = rank_level_named(ascii);
+		*level = card;
+	}
+}
+
+static void lobby_append_id(wchar_t *text, int text_size, char const *id)
+{
+	wchar_t wide[16];
+	size_t length;
+
+	if (!text || !id || !id[0] || text_size < 4)
+		return;
+	length = ustrlen(text);
+	if (length + 4 >= (size_t)text_size)
+		return;
+	rank_wtext(wide, (int)NUMBEROF(wide), id);
+	usnprintf(text + length, (size_t)text_size - 1 - length, L"  %s", wide);
+	text[text_size - 1] = 0;
+}
+
+static void lobby_append_score(wchar_t *text, int text_size, int level)
+{
+	size_t length;
+
+	if (!text || level < 0 || text_size < 4)
+		return;
+	length = ustrlen(text);
+	if (length + 6 >= (size_t)text_size)
+		return;
+	usnprintf(text + length, (size_t)text_size - 1 - length, L"  %d", level);
+	text[text_size - 1] = 0;
 }
 
 static void lobby_row_text(short row, wchar_t *text)
@@ -8884,17 +8590,19 @@ static void lobby_row_text(short row, wchar_t *text)
 	struct network_player *player = lobby_players[multiplayer.lobby_first + row];
 	struct network_game *game = network_game_client_get_game(global_network_game_client_get());
 	wchar_t name[NUMBEROF(player->name) + 1];
-	char ascii[12];
-	int ascii_index;
+	char id[16];
 	int level;
 	size_t length;
 
 	ustrncpy(name, player->name, NUMBEROF(player->name));
 	name[NUMBEROF(player->name)] = 0;
+	usnprintf(text, ROW_TEXT_LENGTH - 1, L"%s", name);
+	text[ROW_TEXT_LENGTH - 1] = 0;
+	lobby_player_marks(player, id, (int)sizeof(id), &level);
+	lobby_append_id(text, ROW_TEXT_LENGTH, id);
+	length = ustrlen(text);
 	if (game && game->variant.universal_variant.teams)
-		usnprintf(text, ROW_TEXT_LENGTH - 1, L"%s  (%s)", name, player->team_index ? L"BLUE" : L"RED");
-	else
-		usnprintf(text, ROW_TEXT_LENGTH - 1, L"%s", name);
+		usnprintf(text + length, ROW_TEXT_LENGTH - 1 - length, L"  (%s)", player->team_index ? L"BLUE" : L"RED");
 	/* (this machine's players, when it has more than one: their controllers) */
 	if (lobby_view_player_count() >= 2 &&
 		(short)player->machine_index == network_game_client_get_local_machine_index() &&
@@ -8904,19 +8612,7 @@ static void lobby_row_text(short row, wchar_t *text)
 		length = ustrlen(text);
 		usnprintf(text + length, ROW_TEXT_LENGTH - 1 - length, L"  [P%d]", player->controller_index + 1);
 	}
-	ascii_index = 0;
-	while (ascii_index < 11 && name[ascii_index])
-	{
-		ascii[ascii_index] = name[ascii_index] >= 32 && name[ascii_index] < 127 ? (char)name[ascii_index] : '?';
-		ascii_index++;
-	}
-	ascii[ascii_index] = 0;
-	level = matchmaking_card_level(ascii);
-	if (level < 0)
-		level = rank_level_named(ascii);
-	length = ustrlen(text);
-	if (level >= 0 && length + 6 < ROW_TEXT_LENGTH)
-		usnprintf(text + length, ROW_TEXT_LENGTH - 1 - length, L"  %d", level);
+	lobby_append_score(text, ROW_TEXT_LENGTH, level);
 	text[ROW_TEXT_LENGTH - 1] = 0;
 }
 
@@ -9012,53 +8708,44 @@ void menu_functions_text_box_drawn(struct widget_instance *widget, rectangle2d c
 		return;
 	}
 
-	/* (the Mods screen's texts: the fonts and widths their lines are
-	measured in, mods_text_fits) */
-	for (row = 0; widget->name && row < NUMBER_OF_MOD_TEXT_BOXES; row++)
-	{
-		if (!strcmp(widget->name, mod_text_box_names[row]))
-		{
-			mods_screen.fonts[row] = draw_string_get_font();
-			mods_screen.widths[row] = (short)(bounds->x1 - bounds->x0);
-			return;
-		}
-	}
-
 	/* (as the lobby last updated them: the rows' widgets go with it) */
-	if (!lobby_icons.count || system_milliseconds() - lobby_icons.updated_at > 250)
+	if (!lobby_icons.count)
 		return;
 	for (row = 0; row < lobby_icons.count; row++)
 	{
 		long machine_index = lobby_icons.machines[row];
 		rectangle2d icon;
 		short size;
+		boolean fresh = system_milliseconds() - lobby_icons.updated_at <= 250;
 
 		if (lobby_icons.texts[row] != widget)
 			continue;
 		{
 			boolean muted = network_voice_machine_muted(machine_index) ||
 				lobby_machine_host_muted(machine_index);
+			boolean speaking = network_voice_machine_speaking(machine_index);
 
-			if (!network_voice_machine_speaking(machine_index) && !muted)
-				return;
-			size = (short)MIN(14, bounds->y1 - bounds->y0);
-			icon.x1 = (short)(bounds->x1 - 4);
-			icon.y0 = (short)((bounds->y0 + bounds->y1 - size) / 2);
-			/* (the name's ink: the icon just left of it, centred on its
-			capitals) */
-			if (widget->parameters.text_box.text && widget->parameters.text_box.text[0])
+			/* (the name's ink: the icon just left of it, centred on its capitals) */
+			if (fresh && (speaking || muted))
 			{
-				rectangle2d text;
-				rectangle2d cursor;
+				size = (short)MIN(14, bounds->y1 - bounds->y0);
+				icon.x1 = (short)(bounds->x1 - 4);
+				icon.y0 = (short)((bounds->y0 + bounds->y1 - size) / 2);
+				if (widget->parameters.text_box.text && widget->parameters.text_box.text[0])
+				{
+					rectangle2d text;
+					rectangle2d cursor;
 
-				draw_unicode_string_compute_bounds(bounds, widget->parameters.text_box.text, &text, &cursor);
-				if (text.x0 - size - 6 >= bounds->x0)
-					icon.x1 = (short)(text.x0 - 6);
-				icon.y0 = (short)(draw_unicode_string_capital_middle(bounds, widget->parameters.text_box.text) - size / 2);
+					draw_unicode_string_compute_bounds(bounds, widget->parameters.text_box.text, &text, &cursor);
+					if (text.x0 - size - 6 >= bounds->x0)
+						icon.x1 = (short)(text.x0 - 6);
+					icon.y0 = (short)(draw_unicode_string_capital_middle(bounds, widget->parameters.text_box.text) - size / 2);
+				}
+				icon.x0 = (short)(icon.x1 - size);
+				icon.y1 = (short)(icon.y0 + size);
 			}
-			icon.x0 = (short)(icon.x1 - size);
-			icon.y1 = (short)(icon.y0 + size);
-			network_voice_draw_icon(&icon, muted, 1.0f);
+			if (fresh && (speaking || muted))
+				network_voice_draw_icon(&icon, muted, 1.0f);
 			return;
 		}
 	}
@@ -9252,11 +8939,14 @@ static void lobby_update(struct widget_instance *list)
 	}
 	lobby_host_controls(list);
 	lobby_join_help(list);
+	network_votekick_lobby_tick();
 	/* the server assigns teams. this lobby does not send a team change.
 	PASTE LINK takes that slot while this is still a private party. */
 	visible_set(named(list, "lobby_button_paste", 0), show_paste);
+	/* a matchmaking lobby assigns the teams. the button stays for a private game. */
 	visible_set(named(list, "lobby_button_team", 0),
-		game && game->variant.universal_variant.teams && !party && !show_paste);
+		game && game->variant.universal_variant.teams && !party && !show_paste &&
+		!matchmaking_game_port());
 	{
 		struct widget_instance *start = named(list, "lobby_button_start", 0);
 
@@ -9297,7 +8987,7 @@ static void lobby_update(struct widget_instance *list)
 		short seconds = network_game_client_get_seconds_to_game_start(client);
 		wchar_t gametype[NUMBEROF(game->variant.human_readable_game_description) + 1];
 		struct matchmaking_offer offer;
-		int have_offer = (party || show_paste) && matchmaking_offer_copy(&offer);
+		int have_offer = (party || show_paste || matchmaking_game_port()) && matchmaking_offer_copy(&offer);
 
 		ustrncpy(gametype, game->variant.human_readable_game_description, NUMBEROF(gametype) - 1);
 		gametype[NUMBEROF(gametype) - 1] = 0;
@@ -9313,43 +9003,65 @@ static void lobby_update(struct widget_instance *list)
 				count = cap;
 			matchmaking_set_locals(count);
 		}
-		/* humans already here, including a friend on this link. a name the
-		service listed besides this client is a seat it is filling. */
+		/* humans sitting in this lobby, including a friend who joined the link.
+		the mesh roster does not include that friend, so the start wait follows
+		the people already in the game. */
 		if (party && global_network_game_server_get())
 		{
 			int humans = 0;
 			int seat;
+			struct network_game *counted = network_game_server_get_game(global_network_game_server_get());
 
+			if (!counted)
+				counted = game;
 			for (seat = 0; seat < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; seat++)
 			{
-				struct network_player *player = &game->players[seat];
+				struct network_player *player = &counted->players[seat];
 
 				if (!network_player_is_valid(player))
 					continue;
 				if (bot_controller_is_bot(player->machine_index, player->controller_index))
-					continue;
-				if (matchmaking_name_is_filler(player->name))
 					continue;
 				humans++;
 			}
 			if (humans < 1)
 				humans = 1;
 			matchmaking_set_players(humans);
+			peer_mesh_set_game_humans(humans);
+			matchmaking_note_seated(humans);
 		}
-		if (party && have_offer)
+		if ((party || matchmaking_game_port()) && have_offer)
 		{
 			wchar_t status[64];
-			int joined = offer.joined >= 0 ? offer.joined : offer.name_count;
+			int rematch_target;
+			int joined;
 			int name;
 			size_t length;
 
-			if (rank_search_blocks())
+			rematch_target = matchmaking_rematch_target();
+			/* the people in the room. a search that has not seated anyone yet
+			still shows the count the offer published. */
+			joined = lobby_player_count;
+			if (joined < 1 && party && rematch_target <= 1)
+				joined = offer.joined >= 0 ? offer.joined : offer.name_count;
+			if (joined < 0)
+				joined = 0;
+
+			/* the server's countdown is the number the other machines show.
+			a party offer that is still waiting must not hide it. */
+			if (seconds > 0)
+				usnprintf(status, NUMBEROF(status) - 1, L"Starting in: %d", seconds);
+			else if (seconds == 0)
+				usnprintf(status, NUMBEROF(status) - 1, L"Starting");
+			else if (party && rank_search_blocks())
 				usnprintf(status, NUMBEROF(status) - 1, L"Mesh ID is still arriving.");
-			else if (!matchmaking_is_ready() || offer.phase == MATCHMAKING_PHASE_PARTY)
+			else if (party && !matchmaking_is_ready())
 				usnprintf(status, NUMBEROF(status) - 1, L"Find Game when ready");
-			else if (offer.wait_seconds > 0)
-				usnprintf(status, NUMBEROF(status) - 1, L"Looking: %d", offer.wait_seconds);
-			else if (offer.wait_seconds == 0)
+			else if (party && (offer.phase == MATCHMAKING_PHASE_PARTY || offer.wait_seconds < 0))
+				usnprintf(status, NUMBEROF(status) - 1, L"Waiting for players");
+			else if (!party)
+				usnprintf(status, NUMBEROF(status) - 1, L"Waiting for players");
+			else if (offer.wait_seconds >= 0)
 				usnprintf(status, NUMBEROF(status) - 1, L"Starting");
 			else
 				usnprintf(status, NUMBEROF(status) - 1, L"Waiting for players");
@@ -9360,20 +9072,70 @@ static void lobby_update(struct widget_instance *list)
 			for (name = 0; name < offer.name_count; name++)
 			{
 				wchar_t who[MATCHMAKING_LOBBY_NAME_LENGTH];
+				char id[16];
 				int level;
+				int seat;
+				struct network_player *seated = NULL;
 
 				length = ustrlen(text);
 				if (length + 4 >= NUMBEROF(text))
 					break;
 				mm_ascii(who, NUMBEROF(who), offer.names[name]);
-				level = matchmaking_card_level(offer.names[name]);
-				if (level < 0)
-					level = rank_level_named(offer.names[name]);
-				if (level >= 0)
-					usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s %d", who, level);
-				else
-					usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s", who);
+				for (seat = 0; seat < lobby_player_count; seat++)
+				{
+					if (lobby_players[seat] && !ustrcmp(who, lobby_players[seat]->name))
+					{
+						seated = lobby_players[seat];
+						break;
+					}
+				}
+				/* a rematch keeps the old search names for the teams. someone who
+				already left is not still sitting in this lobby. a player who
+				joined this host is the same: the names they kept are that search. */
+				if ((rematch_target > 1 || !party) && !seated)
+					continue;
+				usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s", who);
 				text[NUMBEROF(text) - 1] = 0;
+				if (seated)
+					lobby_player_marks(seated, id, (int)sizeof(id), &level);
+				else if (!peer_mesh_player(offer.names[name], -1, id, (int)sizeof(id), &level, 0))
+				{
+					id[0] = 0;
+					level = matchmaking_card_level(offer.names[name]);
+					if (level < 0)
+						level = rank_level_named(offer.names[name]);
+				}
+				lobby_append_id(text, NUMBEROF(text), id);
+				lobby_append_score(text, NUMBEROF(text), level);
+			}
+			for (name = 0; name < lobby_player_count; name++)
+			{
+				struct network_player *player = lobby_players[name];
+				wchar_t who[MATCHMAKING_LOBBY_NAME_LENGTH];
+				char id[16];
+				int level;
+				int listed;
+				int other;
+
+				if (!player || bot_controller_is_bot(player->machine_index, player->controller_index))
+					continue;
+				listed = 0;
+				for (other = 0; other < offer.name_count; other++)
+				{
+					mm_ascii(who, NUMBEROF(who), offer.names[other]);
+					if (!ustrcmp(who, player->name))
+						listed = 1;
+				}
+				if (listed)
+					continue;
+				length = ustrlen(text);
+				if (length + 4 >= NUMBEROF(text))
+					break;
+				usnprintf(text + length, NUMBEROF(text) - 1 - length, L"\r\n%s", player->name);
+				text[NUMBEROF(text) - 1] = 0;
+				lobby_player_marks(player, id, (int)sizeof(id), &level);
+				lobby_append_id(text, NUMBEROF(text), id);
+				lobby_append_score(text, NUMBEROF(text), level);
 			}
 		}
 		else
@@ -9382,7 +9144,7 @@ static void lobby_update(struct widget_instance *list)
 				engine_names[PIN(game->variant.game_engine_index, 0, 5)], lobby_player_count, game->maximum_players,
 				seconds > 0 ? L"Starting in:" : party && matchmaking_is_ready() ? L"Looking for a match" :
 				party && rank_search_blocks() ? L"Mesh ID is still arriving." :
-				party ? L"Find Game when ready" : game->machine_count < 2 ? L"Waiting for players" : L"");
+				party ? L"Find Game when ready" : matchmaking_game_port() || game->machine_count < 2 ? L"Waiting for players" : L"");
 			text[NUMBEROF(text) - 1] = 0;
 			if (seconds > 0)
 			{
@@ -11043,7 +10805,9 @@ static boolean hardcore_open(struct widget_instance *list)
 static void hardcore_rows_place(struct widget_instance *list, boolean maps)
 {
 	struct widget_instance *child;
-	short top = maps ? 103 : 73;
+	short top = 73;
+
+	(void)maps;
 
 	for (child = list->child; child; child = child->next)
 	{
@@ -11108,12 +10872,18 @@ static void hardcore_maps_update(struct widget_instance *list)
 	struct widget_instance *description = list->parameters.list.extended_description;
 	struct widget_instance *kind_row = named(list, "hardcore_kind", 0);
 	struct widget_instance *spinner = named(list, "hardcore_kind_spinner", 0);
-	short kind = spinner ? (short)(spinner->parameters.list.selected_index != 0) : 0;
+	short kind = 0;
 	short count, entry, shown;
 
-	visible_set(kind_row, hardcore_list.maps);
+	if (spinner)
+		spinner->parameters.list.selected_index = 0;
+	visible_set(kind_row, FALSE);
 	if (kind_row)
-		kind_row->disabled = !hardcore_list.maps;
+	{
+		kind_row->disabled = TRUE;
+		if (list->focused_child == kind_row)
+			focus_row(list, hardcore_list.maps ? 1 : 0);
+	}
 	hardcore_rows_place(list, hardcore_list.maps);
 	if (!hardcore_list.maps)
 	{
@@ -11458,7 +11228,7 @@ static void hardcore_server_update(struct widget_instance *list)
 	struct widget_instance *listing = named(list, "op_listing", 0);
 	struct widget_instance *help = list->parameters.list.extended_description ?
 		named(list->parameters.list.extended_description, "server_help", 0) : NULL;
-	char text[TEXT_FIELD_LENGTH];
+	char text[160];
 	boolean internet;
 
 	if (!multiplayer.hardcore)
@@ -11499,7 +11269,17 @@ static void hardcore_server_update(struct widget_instance *list)
 		text_field_show(named(list, "password_value", 0), index ? text : "NONE", text_field_editing(row));
 	}
 	server_text_chat_apply(list);
-	server_mods_apply(list);
+	{
+		struct widget_instance *share = named(list, "op_map_share", 0);
+
+		visible_set(share, FALSE);
+		if (share)
+		{
+			share->disabled = TRUE;
+			if (list->focused_child == share)
+				focus_row(list, 0);
+		}
+	}
 	if (!help || !list->focused_child)
 		return;
 	if (!strcmp(list->focused_child->name, "op_server_name"))
@@ -11521,8 +11301,6 @@ static void hardcore_server_update(struct widget_instance *list)
 		help->parameters.text_box.string_list_index = 8;
 	else if (!strcmp(list->focused_child->name, "op_text_chat"))
 		help->parameters.text_box.string_list_index = p2p_hosting_listed() ? 10 : 9;
-	else if (!strcmp(list->focused_child->name, "op_mods"))
-		help->parameters.text_box.string_list_index = 11;
 	else
 		help->parameters.text_box.string_list_index = 0;
 }
@@ -12027,6 +11805,8 @@ static const wchar_t *mm_game_name(const struct matchmaking_offer *offer)
 		return L"2v2";
 	if (!strcmp(offer->playlist, "ffa"))
 		return L"FFA";
+	if (!strcmp(offer->playlist, "ranked"))
+		return L"Ranked";
 	return mm_mode_name(offer->rules.mode);
 }
 
@@ -12418,6 +12198,68 @@ static void mm_paste_restore(struct widget_instance *widget)
 	}
 }
 
+/* a find-game join was refused because that lobby was full. the main menu
+opens the same playlist and searches again. */
+void menu_matchmaking_resume(struct widget_instance *screen)
+{
+	char playlist[16];
+	struct matchmaking_catalog catalog;
+	struct matchmaking_playlist row;
+	char name[12];
+	int index;
+	int found = 0;
+	boolean deleted = FALSE;
+
+	if (!screen || !matchmaking_take_resume(playlist, (int)sizeof(playlist)))
+		return;
+	mm_switching = 0;
+	mm_switch_started = 0;
+	mm_switch_join = 0;
+	mm_switch_posts = 0;
+	mm_joined_invite[0] = 0;
+	mm_paste_reset();
+	mm_follow_reset();
+	mm_lobby_clear();
+	if (matchmaking_catalog(&catalog) <= 0)
+		return;
+	for (index = 0; index < catalog.count && index < 8; index++)
+	{
+		if (!strcmp(catalog.playlist[index].id, playlist))
+		{
+			row = catalog.playlist[index];
+			found = 1;
+			break;
+		}
+	}
+	if (!found)
+		return;
+	rank_party_fill_now();
+	rank_search_set(row.ranked);
+	mm_gamertag(name, (int)sizeof(name));
+	mm_menu.invited = 0;
+	mm_menu.waiting = 0;
+	matchmaking_queue(playlist, name);
+	if (!matchmaking_queue_active())
+		return;
+	matchmaking_party_offer(&mm_menu.offer, &row);
+	if (!mm_begin_host(screen, NULL, 1))
+	{
+		matchmaking_reset();
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		return;
+	}
+	mm_menu.state = MM_MENU_DONE;
+	if (!ui_widget_port_open(screen, LOBBY_NAME, &deleted))
+	{
+		matchmaking_reset();
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		return;
+	}
+	matchmaking_find_game();
+}
+
 /* the host named by the pasted link is on the wire. enter that lobby.
 the screen this runs from is replaced, so it runs from the paste button,
 not from the lobby's draw, and not from Find Game. */
@@ -12706,6 +12548,8 @@ static int mm_lobby_switch(struct widget_instance *list)
 	matchmaking_set_game_port(offer.port);
 	if (!mm_switch_started)
 	{
+		/* a full lobby sends this player back to the same search */
+		matchmaking_arm_rejoin();
 		/* this lobby must not start once we are leaving it */
 		dispose_global_network_game_server();
 		dispose_global_network_game_client();
@@ -12950,6 +12794,9 @@ static boolean mm_begin_host(struct widget_instance *widget, struct event_record
 
 static boolean mm_begin_join(struct widget_instance *widget, struct event_record *event)
 {
+	/* a full lobby sends this player back to the same search */
+	if (matchmaking_queue_active() && matchmaking_is_ready())
+		matchmaking_arm_rejoin();
 	/* the offer's port is the game port inside the invite tunnel. 5150 is an
 	ordinary lobby, and this host drops it. */
 	matchmaking_set_game_port(mm_menu.offer.port);
@@ -13321,6 +13168,17 @@ static boolean clips_play_double(struct widget_instance *widget, short controlle
 
 /* ---------- public code */
 
+/* the question is the screen in front of the main menu. it closes before
+the window hides, so opening the window again shows the main menu */
+static void menu_quit_to_background(struct widget_instance *widget, boolean *widget_deleted)
+{
+	if (widget)
+		ui_widget_port_go_back(widget);
+	if (widget_deleted)
+		*widget_deleted = TRUE;
+	platform_request_quit();
+}
+
 boolean pc_menu_event_function_invoke(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -13332,7 +13190,7 @@ boolean pc_menu_event_function_invoke(
 	switch (function_index)
 	{
 	case _pc_menu_function_quit_game:
-		platform_request_quit();
+		menu_quit_to_background(widget, widget_deleted);
 		return TRUE;
 	case _pc_menu_function_setting_load:
 		return setting_load(widget);
@@ -13346,7 +13204,7 @@ boolean pc_menu_event_function_invoke(
 			return FALSE;
 		if (!strcmp(name, "main menu quit game"))
 		{
-			platform_request_quit();
+			menu_quit_to_background(widget, widget_deleted);
 		}
 		else if (!strcmp(name, "profile set edit begin"))
 		{
@@ -13675,22 +13533,6 @@ boolean pc_menu_event_function_invoke(
 			sensitivity_finish_typing(FALSE);
 			settings_each(screen_of(widget), setting_default_show);
 		}
-		else if (!strcmp(name, "port mods init") || !strcmp(name, "port mods close"))
-		{
-			return mods_screen_reset();
-		}
-		else if (!strcmp(name, "port mods toggle"))
-		{
-			return mods_toggle(widget);
-		}
-		else if (!strcmp(name, "port mods move up") || !strcmp(name, "port mods move down"))
-		{
-			return mods_move(widget, (short)(!strcmp(name, "port mods move up") ? -1 : 1));
-		}
-		else if (!strcmp(name, "port mods save"))
-		{
-			return mods_save();
-		}
 		else if (!strcmp(name, "controls screen init") || !strcmp(name, "controls screen defaults"))
 		{
 			return controls_load(widget, !strcmp(name, "controls screen defaults"));
@@ -13923,8 +13765,6 @@ void pc_menu_game_data_function_invoke(
 	}
 	else if (!strcmp(name, "controls update menu"))
 		controls_update(widget);
-	else if (!strcmp(name, "port mods update"))
-		mods_update(widget);
 	else if (!strcmp(name, "color picker update"))
 		color_list_update(widget);
 	else if (!strcmp(name, "3wide player profile list update"))

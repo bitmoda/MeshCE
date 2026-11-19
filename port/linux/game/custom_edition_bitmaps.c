@@ -23,10 +23,6 @@ would mean decompressing them, which the texture cache has no room for, so
 the renderer is told where Halo PC keeps the channels of each bitmap's
 pixels as they arrive, and samples them in this build's order
 (port/linux/src/xbox_textures.c).
-
-The bitmaps of mods (port/linux/game/mod_bitmaps.c) are Halo PC's too,
-whatever map they are played on: their channels are found in the same way
-in the loaded map's tags, once the mods' bitmaps are in them.
 */
 
 /* ---------- headers */
@@ -94,23 +90,8 @@ enum
 
 /* ---------- structures */
 
-/* a tag in the loaded map's table (cache_files.c's) */
-struct cache_file_tag_instance
-{
-	long group_tag;
-	long parent_group_tags[2];
-	long tag_index;
-	char *name;
-	void *base_address;
-	unsigned long unused[2];
-};
-
-typedef char verify_cache_file_tag_instance_size[
-	sizeof(struct cache_file_tag_instance) == 0x20 ? 1 : -1];
-
 /* the tags the bitmaps' users are found in: a tag cache
-custom_edition_cache_load filled (`loaded_bytes` of it in use), or with no
-tag cache the loaded map's, which the validator has checked */
+custom_edition_cache_load filled (`loaded_bytes` of it in use) */
 struct tag_view
 {
 	byte *tag_cache;
@@ -207,10 +188,6 @@ static struct custom_edition_bitmaps_globals custom_edition_bitmaps_globals;
 
 /* ---------- prototypes */
 
-/* the game's (port: cache_files.c) */
-void *cache_files_tag_instances(long *count);
-boolean tag_index_is_group(long tag_index, long group_tag);
-
 /* ---------- private code */
 
 /* the definition of the next tag of group `group_tag` after the absolute
@@ -222,30 +199,10 @@ static void *view_tag_next(
 	unsigned long definition_bytes,
 	int32_t *tag_index)
 {
-	struct cache_file_tag_instance *instances;
-	long count;
-	long index;
-
 	if (view->tag_cache)
 	{
 		return custom_edition_cache_tag_next(view->tag_cache, view->loaded_bytes, group_tag, definition_bytes, tag_index);
 	}
-	instances = cache_files_tag_instances(&count);
-	for (index = *tag_index < 0 ? 0 : *tag_index + 1; instances && index < count; index++)
-	{
-		struct cache_file_tag_instance const *instance = &instances[index];
-
-		if (instance->base_address &&
-			((unsigned long)instance->group_tag == group_tag ||
-				(unsigned long)instance->parent_group_tags[0] == group_tag ||
-				(unsigned long)instance->parent_group_tags[1] == group_tag))
-		{
-			*tag_index = (int32_t)index;
-			return instance->base_address;
-		}
-	}
-	*tag_index = (int32_t)count;
-
 	return NULL;
 }
 
@@ -262,8 +219,7 @@ static void *view_tag_get(
 		return custom_edition_cache_tag_get(view->tag_cache, view->loaded_bytes, (unsigned long)handle, group_tag,
 			definition_bytes);
 	}
-
-	return tag_index_is_group(handle, (long)group_tag) ? tag_get(group_tag, handle) : NULL;
+	return NULL;
 }
 
 /* element `element_index` of a block, or NULL */
@@ -278,9 +234,7 @@ static void *view_block_element(
 		return custom_edition_cache_block_element(view->tag_cache, view->loaded_bytes, block, element_index,
 			element_bytes);
 	}
-
-	return element_index >= 0 && element_index < block->count && block->address ?
-		(byte *)block->address + element_index * element_bytes : NULL;
+	return NULL;
 }
 
 /* the name of the tag of absolute index `tag_index`, for messages */
@@ -288,17 +242,9 @@ static char const *view_tag_name(
 	struct tag_view const *view,
 	long tag_index)
 {
-	struct cache_file_tag_instance *instances;
-	long count;
-
 	if (view->tag_cache)
-	{
 		return custom_edition_cache_tag_name(view->tag_cache, view->loaded_bytes, tag_index);
-	}
-	instances = cache_files_tag_instances(&count);
-
-	return instances && tag_index >= 0 && tag_index < count && instances[tag_index].name ?
-		instances[tag_index].name : "";
+	return "";
 }
 
 static boolean power_of_two(
@@ -687,8 +633,7 @@ static boolean reordered_bitmaps_find(
 		{
 			error(
 				_error_silent,
-				"%s: bitmap %d of '%s' is drawn with Halo PC's %s channels and otherwise too, and keeps its channels as they are",
-				view->tag_cache ? "custom edition" : "mods",
+				"custom edition: bitmap %d of '%s' is drawn with Halo PC's %s channels and otherwise too, and keeps its channels as they are",
 				bitmap->bitmap_index,
 				view_tag_name(view, DATUM_INDEX_TO_ABSOLUTE_INDEX(bitmap->handle)),
 				bitmap->channel_order == _custom_edition_channels_multipurpose ? "multipurpose map" : "HUD meter");
@@ -708,24 +653,12 @@ static boolean reordered_bitmaps_find(
 			bitmap_index++;
 		}
 	}
-	if (view->tag_cache)
-	{
-		error(
-			_error_silent,
-			"custom edition: %ld multipurpose maps and %ld HUD meters are drawn with their channels in this build's order (%ld drawn otherwise too are not)",
-			multipurpose_count,
-			meter_count,
-			kept_count);
-	}
-	else
-	{
-		error(
-			_error_silent,
-			"mods: of the map's bitmaps, %ld are multipurpose maps and %ld HUD meters, a mod's drawn with its channels in this build's order (%ld drawn otherwise too are not)",
-			multipurpose_count,
-			meter_count,
-			kept_count);
-	}
+	error(
+		_error_silent,
+		"custom edition: %ld multipurpose maps and %ld HUD meters are drawn with their channels in this build's order (%ld drawn otherwise too are not)",
+		multipurpose_count,
+		meter_count,
+		kept_count);
 
 	return TRUE;
 }
@@ -782,20 +715,6 @@ boolean custom_edition_reordered_bitmaps_find(
 
 	view.tag_cache = tag_cache;
 	view.loaded_bytes = loaded_bytes;
-
-	return reordered_bitmaps_find(&view);
-}
-
-boolean custom_edition_loaded_reordered_bitmaps_find(
-	void)
-{
-	struct custom_edition_bitmaps_globals *globals = &custom_edition_bitmaps_globals;
-	struct tag_view view;
-
-	/* (found again: the tags may have changed) */
-	globals->reordered_bitmap_count = 0;
-	view.tag_cache = NULL;
-	view.loaded_bytes = 0;
 
 	return reordered_bitmaps_find(&view);
 }

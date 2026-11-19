@@ -34,6 +34,22 @@ int native_map_is_custom(char const *map)
     return name[0] != 0;
 }
 
+int native_map_is_retail(char const *map)
+{
+    static char const *campaign[] = {
+        "ui", "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40"
+    };
+    unsigned int i;
+    char const *name = native_map_basename(map);
+
+    if (!name[0]) return FALSE;
+    for (i = 0; i < NUMBEROF(stock_names); i++)
+        if (!_stricmp(name, stock_names[i])) return TRUE;
+    for (i = 0; i < NUMBEROF(campaign); i++)
+        if (!_stricmp(name, campaign[i])) return TRUE;
+    return FALSE;
+}
+
 static unsigned long little_u32(unsigned char const *p)
 {
     return (unsigned long)p[0] | (unsigned long)p[1] << 8 |
@@ -97,53 +113,13 @@ int native_map_get_path(char const *map, char *path, unsigned int capacity)
     char const *name = native_map_basename(map);
     int length = snprintf(path, capacity, "%s%s.map", cache_files_map_directory(), name);
     if (length < 0 || (unsigned int)length >= capacity) return FALSE;
-#ifdef HALO_MACOS
-    HANDLE file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
-    if (file != INVALID_HANDLE_VALUE) {
-        CloseHandle(file);
-        return TRUE;
-    }
-    if (map_can_download(name)) {
-        char directory[1024], overlay[256], canonical[HALO_CUSTOM_MAP_NAME_SIZE];
-        unsigned int i;
-        for (i = 0; name[i]; i++)
-            canonical[i] = name[i] >= 'A' && name[i] <= 'Z' ? name[i] + ('a' - 'A') : name[i];
-        canonical[i] = 0;
-        if (halo_map_download_directory(directory, sizeof(directory)) &&
-            halo_map_download_request(canonical) == 1) {
-            length = snprintf(overlay, sizeof(overlay), "m:\\%s.map", canonical);
-            if (length > 0 && (unsigned int)length < sizeof(overlay) &&
-                (unsigned int)length < capacity) {
-                file = CreateFileA(overlay, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
-                if (file != INVALID_HANDLE_VALUE) {
-                    CloseHandle(file);
-                    memcpy(path, overlay, (unsigned int)length + 1);
-                }
-            }
-        }
-    }
-#endif
     return TRUE;
 }
 
 int native_map_download_pending(char const *map)
 {
-#ifdef HALO_MACOS
-    char path[256];
-    HANDLE file;
-    int status;
-    if (!map_can_download(native_map_basename(map)) || !native_map_get_path(map, path, sizeof(path))) return 0;
-    file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
-    if (file != INVALID_HANDLE_VALUE) {
-        CloseHandle(file);
-        return 0;
-    }
-    status = halo_map_download_request(native_map_basename(map));
-    return status == 2 || status == -1 ? status : 0;
-#else
     (void)map;
     return 0;
-#endif
 }
 
 static void discover_maps(char const *directory, int managed)
@@ -207,15 +183,6 @@ char **native_multiplayer_map_list(char **stock, short stock_count, short *count
        files are visible; no worker thread mutates these guest-side arrays. */
     map_count = stock_count;
     for (i = 0; i < stock_count; i++) map_list[i] = stock[i];
-    discover_maps(cache_files_map_directory(), FALSE);
-#ifdef HALO_MACOS
-    {
-        char directory[1024];
-        if (halo_map_download_directory(directory, sizeof(directory)))
-            discover_maps("m:\\", TRUE);
-    }
-#endif
-    qsort(map_list + stock_count, map_count - stock_count, sizeof(map_list[0]), map_compare);
     *count = map_count;
     return map_list;
 }

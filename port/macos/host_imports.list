@@ -8,6 +8,8 @@ host_sdl_audio_device_count
 host_sdl_audio_device_name
 host_sdl_audio_device_id
 host_sdl_audio_stream_device_name
+# The menu's Quit hides the window. Quit MeshCE on the menu bar ends the process.
+host_sdl_background_game
 # The peer id's seed, sealed to the secure element. Other hosts have no such call.
 host_peer_wrap
 host_peer_unwrap

@@ -3,16 +3,16 @@
 
     python tools/app_icon.py
 
-- opence-icon.png: the Windows executable's icon (port/windows/opence-icon.ico,
+- meshce-icon.png: the Windows executable's icon (port/windows/meshce-icon.ico,
   which port/windows/halo.rc puts in halo.exe), the Linux and Windows window
-  icon (opence-icon-256.png, which tools/embed_assets.py embeds and
+  icon (meshce-icon-256.png, which tools/embed_assets.py embeds and
   sdl_platform.c gives the window), and the Mac app icon
   (tools/macos_build.py);
-- opence-icon-render.png, the OpenCE wordmark (1024x1024, the same picture
-  as opence-icon.png): the Android app's launcher icon.
+- meshce-icon-render.png, the same visor picture as meshce-icon.png
+  (1024x1024): the Android app's launcher icon.
 
-The launcher icon is an adaptive one (Android 8 and later): the wordmark as its
-foreground layer, a black field as its background layer, and the wordmark's
+The launcher icon is an adaptive one (Android 8 and later): the visor as its
+foreground layer, a black field as its background layer, and the visor's
 light parts as its monochrome (themed icon) layer. Launchers mask adaptive
 icons to their own shapes and show only
 the middle 72 dp of the 108 dp layers, so the render fills those 72 dp, as
@@ -31,10 +31,10 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTWORK = ROOT / "port/assets/icon"
-ICON = ARTWORK / "opence-icon.png"
-RENDER = ARTWORK / "opence-icon-render.png"
-WINDOW_ICON = ARTWORK / "opence-icon-256.png"
-WINDOWS_ICON = ROOT / "port/windows/opence-icon.ico"
+ICON = ARTWORK / "meshce-icon.png"
+RENDER = ARTWORK / "meshce-icon-render.png"
+WINDOW_ICON = ARTWORK / "meshce-icon-256.png"
+WINDOWS_ICON = ROOT / "port/windows/meshce-icon.ico"
 RESOURCES = ROOT / "port/android/app/src/main/res"
 
 # the layers' size, and the part of them a launcher shows, in dp
@@ -108,7 +108,7 @@ def main() -> None:
                 directory / f"{name}.png", optimize=True)
         print(f"{directory.relative_to(ROOT)}: {size}x{size}")
 
-    # The wordmark fills the layer. The background matches its black field.
+    # The visor fills the layer. The background matches its black field.
     top, bottom = (0x00, 0x00, 0x00), (0x00, 0x00, 0x00)
     drawable = RESOURCES / "drawable"
     drawable.mkdir(parents=True, exist_ok=True)

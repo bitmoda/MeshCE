@@ -194,7 +194,7 @@ def updater_defines(release: bool) -> str:
     channel = os.environ.get("HALO_BUILD_CHANNEL", "main")
     if channel not in ("main", "testing"):
         raise RuntimeError("HALO_BUILD_CHANNEL must be main or testing")
-    repository = os.environ.get("HALO_UPDATE_REPOSITORY", "mastercheese-dev/OpenCE")
+    repository = os.environ.get("HALO_UPDATE_REPOSITORY", "bitmoda/MeshCE")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise RuntimeError("HALO_UPDATE_REPOSITORY must be owner/name")
     flavor = "release" if release else "debug"
@@ -755,12 +755,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     cflags += profile_use_flags(profile)
     validator = build_dir / "map_validate"
     emit(obj_dir, output, cflags, ldflags, [profile] if profile else [], validator)
-    # internet play's MQTT brokers, a file beside the game (network.brokers_file)
-    brokers = build_dir / "brokers.txt"
-    n.build(outputs=brokers, rule="linux_copy", inputs=Path("port/assets/network/brokers.txt"))
     # the match and campaign loading film, beside the game
     film = build_dir / "opening_frames.bin"
     n.build(outputs=film, rule="linux_copy", inputs=Path("port/assets/opening/opening_frames.bin"))
     n.build(outputs="linux", rule="phony",
-            inputs=[output, brokers, film, validator, *sdl_outputs])
+            inputs=[output, film, validator, *sdl_outputs])
     n.newline()

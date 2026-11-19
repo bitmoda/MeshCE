@@ -701,13 +701,6 @@ void scenario_tags_unload(
 	}
 	sound_cache_close();
 	texture_cache_close();
-	/* port: the mods' tags go, after the sound and texture caches that held
-	their sounds and bitmaps (port/linux/game/mods.c) */
-	{
-		extern void mods_tags_unloaded(void);
-
-		mods_tags_unloaded();
-	}
 	/* port: the singleplayer HUD leaves the table before the menus restore
 	the map's own (port/linux/game/stock_hud.c). the texture cache has
 	closed, so nothing still holds one of its bitmaps */
@@ -1207,15 +1200,10 @@ boolean cache_files_map_present(
 
 	if (!map_name || !map_name[0])
 		return TRUE;
-	if (custom_edition_level_name(map_name))
+	if (custom_edition_level_name(map_name) || !native_map_is_retail(name))
 	{
-		if (custom_edition_cache_present(map_name, version, message, sizeof(message)))
-			return TRUE;
-		/* ask even when the saved download switch is off, so a shared map
-		starts coming down instead of the missing-map line */
-		map_share_download_permit();
-		if (map_share_download_begin(map_name, version, message))
-			return TRUE;
+		snprintf(message, sizeof(message),
+			"This client only plays the original Xbox maps.");
 	}
 	else
 	{
@@ -1318,6 +1306,12 @@ long scenario_tags_load(
 	boolean read_complete;
 
 	stripped_scenario_name = tag_name_strip_path(scenario_name);
+	if (custom_edition_level_name(scenario_name) || !native_map_is_retail(stripped_scenario_name))
+	{
+		error(_error_silent, "this client only plays the original Xbox maps (%.64s)",
+			stripped_scenario_name);
+		return NONE;
+	}
 	result = NONE;
 	texture_cache_open();
 	sound_cache_open();
@@ -1346,12 +1340,6 @@ long scenario_tags_load(
 				extern void menu_tags_loaded(char const *map_name);
 
 				menu_tags_loaded(cache_file_globals.header.name);
-			}
-			/* (and the mods' tags, as below) */
-			{
-				extern void mods_tags_loaded(char const *map_name);
-
-				mods_tags_loaded(stripped_scenario_name);
 			}
 			/* port: the singleplayer HUD, in place of this map's
 			(port/linux/game/stock_hud.c) */
@@ -1461,15 +1449,6 @@ long scenario_tags_load(
 				extern void hud_hires_tags_loaded(long scenario_index);
 
 				hud_hires_tags_loaded(cache_file_globals.tag_header->scenario_tag_index);
-			}
-			/* port: the mods' sounds, bitmaps, text and models played over
-			the map's, last, over the menus' tags too, and with the high-res
-			HUD standing for the map's bitmaps, not a mod's (the main menu's
-			Mods: port/linux/game/mods.c) */
-			{
-				extern void mods_tags_loaded(char const *map_name);
-
-				mods_tags_loaded(stripped_scenario_name);
 			}
 			result = cache_file_globals.tag_header->scenario_tag_index;
 		}

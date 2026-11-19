@@ -8,9 +8,9 @@ with additional data, which seals the tunnel's packets (a counter for their
 nonce) and, with a random nonce sent ahead of the ciphertext, signalling's
 messages; X25519 (RFC 7748), with which two machines agree on their
 tunnel's keys without sending them; and Ed25519 (RFC 8032, Monocypher's),
-with which a host signs its public game's listing (p2p_lobby.c). The public
-brokers carry sealed messages, so only holders of the invite read them; the
-tunnel's packets are sealed with keys only its two machines have.
+with which a host signs its public game's listing (p2p_lobby.c). The
+handshake is sealed, so only holders of the invite read it. The tunnel's
+packets are sealed with keys only its two machines have.
 */
 
 #include "posix.h"

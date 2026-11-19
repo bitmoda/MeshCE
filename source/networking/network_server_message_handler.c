@@ -278,6 +278,10 @@ void network_voice_handle_message(long machine_index, word const *message, word 
 boolean map_share_handles_message(word const *message, word size);
 void map_share_handle_message(long machine_index, word const *message, word size, boolean from_stream);
 void network_distributed_handle_stream_message(long machine_index, word const *message, word size);
+/* port/linux/game/network_votekick.c's: a lobby vote, before the match */
+boolean network_votekick_handles_message(word const *message, word size);
+/* port/linux/game/network_peer.c's: a machine's mesh id, in the lobby too */
+boolean network_peer_handles_message(word const *message, word size);
 
 /* ---------- constants */
 
@@ -1473,6 +1477,35 @@ boolean network_game_server_handle_client_message(
 					{
 						network_game_server_client_machine_heard(server, machine);
 						map_share_handle_message(machine_index, message, message_buffer_size, TRUE);
+					}
+					break;
+				}
+				/* a lobby vote arrives before the match, on the machine's stream */
+				if (network_game_server_lobby_is_open(server) &&
+					network_votekick_handles_message(message, message_buffer_size))
+				{
+					long machine_index;
+
+					if (network_game_server_client_machine_is_joined_to_game(server, machine) &&
+						network_game_server_get_client_machine(server, machine, &machine_index))
+					{
+						network_game_server_client_machine_heard(server, machine);
+						network_distributed_handle_stream_message(machine_index, message, message_buffer_size);
+					}
+					break;
+				}
+				/* a machine's mesh id, so the lobby can name each install
+				before the match */
+				if (network_game_server_get_state(server, NULL) == _network_game_server_state_pregame &&
+					network_peer_handles_message(message, message_buffer_size))
+				{
+					long machine_index;
+
+					if (network_game_server_client_machine_is_joined_to_game(server, machine) &&
+						network_game_server_get_client_machine(server, machine, &machine_index))
+					{
+						network_game_server_client_machine_heard(server, machine);
+						network_distributed_handle_stream_message(machine_index, message, message_buffer_size);
 					}
 					break;
 				}
@@ -2835,6 +2868,8 @@ static boolean network_game_server_handle_message_client_remove_player_request_i
 
 				remove_player.player = player;
 				remove_player.game_time = game_time_get() + REMOVE_PLAYER_INGAME_GAME_TIME_DELAY;
+				network_game_server_remember_quit(player.machine_index, player.controller_index,
+					remove_player.game_time);
 				encoded_message = create_network_game_message(
 					_message_server_remove_player_ingame,
 					&remove_player,

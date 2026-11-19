@@ -28,9 +28,6 @@ add_executable(Halo MACOSX_BUNDLE ${HOST_SOURCES} ${MINIUPNPC_SOURCES} ${MBEDTLS
     "${HALO_ROOT}/port/macos/host/entry.s" "${HALO_BUILD}/host/host_import_table.c"
     "${HALO_BUILD}/embed/guest_image.s")
 target_sources(Halo PRIVATE Assets.xcassets)
-target_sources(Halo PRIVATE "${HALO_ROOT}/port/assets/network/brokers.txt")
-set_source_files_properties("${HALO_ROOT}/port/assets/network/brokers.txt"
-    PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 target_sources(Halo PRIVATE "${HALO_ROOT}/port/assets/opening/opening_frames.bin")
 set_source_files_properties("${HALO_ROOT}/port/assets/opening/opening_frames.bin"
     PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

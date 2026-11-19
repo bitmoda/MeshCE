@@ -13,7 +13,9 @@ config.toml:
   world units, both alive). Co-op has no engine teams and hears everyone.
   A voice heard for being near is quieter further away, and comes from the
   speaker's side (each listener's own reckoning of where everyone is).
-  network.voice_mode is no longer what chooses this.
+  network.voice_mode is no longer what chooses this. A matchmaking free
+  for all hears everyone, anywhere. Matchmaking 2v2 and Ranked hear
+  teammates. The lobby and the carnage report still hear everyone.
 - The quality: network.voice_kbps (8 to 64), in the lobby and in a game,
   which the host tells each machine to encode at, and holds it to.
 
@@ -22,7 +24,8 @@ key the host gave it over its stream (a datagram's source address is all
 that names its machine, and anyone can send one as from another's), no
 larger than the quality allows, no more than VOICE_FRAMES_PER_SECOND (with
 a little burst), only while voice is on, and no more than
-VOICE_MAXIMUM_TALKERS machines at once. A machine is sent voices once it
+VOICE_MAXIMUM_TALKERS machines at once. A matchmaking free for all hears
+up to sixteen at once. A machine is sent voices once it
 has said it hears them (a frame, or an empty one every two seconds), so a
 build without voice chat is never sent any. The host relays only: it never
 decodes, and a machine's own voice never comes back to it.
@@ -58,6 +61,7 @@ player's voice.
 #include "network_distributed.h"
 #include "network_voice.h"
 #include "network_chat.h"
+#include "../src/matchmaking.h"
 #include "../src/voice_audio.h"
 
 #include <math.h>
@@ -332,10 +336,17 @@ static boolean voice_in_lobby(
 }
 
 /* Lobby: everyone. A team game: the whole team. A free-for-all: anyone
-nearby. Co-op has no engine and hears everyone. The config mode is unused. */
+nearby. Co-op has no engine and hears everyone. Matchmaking free for all
+hears everyone. 2v2 and Ranked hear teammates. The config mode is unused. */
 static short voice_effective_mode(void)
 {
-	if (voice_in_lobby() || !game_engine || game_engine_has_teams())
+	if (voice_in_lobby() || !game_engine)
+		return _voice_mode_team_global;
+	if (matchmaking_voice_open())
+		return _voice_mode_team_global;
+	if (matchmaking_comms_team() && !game_engine_has_teams())
+		return _voice_mode_off;
+	if (game_engine_has_teams())
 		return _voice_mode_team_global;
 	return _voice_mode_team_enemy_proximity;
 }
@@ -470,6 +481,9 @@ static short voice_route_between(
 		return voice_route(voice_effective_mode(), TRUE, TRUE, FALSE, FALSE, 0.0f, 0.0f);
 	if (!speaker || !listener)
 		return _voice_route_none;
+	/* a matchmaking free for all hears every player, anywhere */
+	if (matchmaking_voice_open())
+		return _voice_route_global;
 	/* (co-op: one team; a game without teams: none) */
 	teammates = !game_engine || (game_engine_has_teams() && speaker->team_index == listener->team_index);
 	both_alive = voice_player_position(speaker, &speaker_position) &&
@@ -650,6 +664,7 @@ static void voice_host_relay(
 	long speaker_player = NONE;
 	unsigned long now = system_milliseconds();
 	short index;
+	int talker_cap = matchmaking_voice_open() ? 16 : VOICE_MAXIMUM_TALKERS;
 
 	if (!voice_machine_valid(speaker_machine) || length <= 0 ||
 		length > voice_packet_limit(voice_host_settings.kbps))
@@ -661,7 +676,7 @@ static void voice_host_relay(
 		return;
 	/* (no more than so many at once: those talking keep talking) */
 	if (!(voice_machines[speaker_machine].talked && now - voice_machines[speaker_machine].talked_at < VOICE_TALKING_MS) &&
-		voice_host_talkers(speaker_machine, now) >= VOICE_MAXIMUM_TALKERS)
+		voice_host_talkers(speaker_machine, now) >= talker_cap)
 	{
 		return;
 	}

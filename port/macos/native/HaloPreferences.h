@@ -29,8 +29,8 @@ BOOL HaloUpdateConfigurationIsValid(NSDictionary *info);
    never a HALO_SAVE_ROOT override. The copy helper is separately fixtureable.
    Existing destination files/settings and the complete legacy tree survive. */
 /* HaloLegacySupportDirectory finds Halo OG or Halo CE Universal.
-   A copy into Application Support/OpenCE runs only for that older folder.
-   This build stores its own files in Application Support/OpenCE Mesh, so
+   A copy into Application Support/MeshCE runs only for that older folder.
+   This build stores its own files in Application Support/MeshCE Mesh, so
    that copy does not run. Nil when neither older folder is present. */
 NSURL *HaloLegacySupportDirectory(void);
 BOOL HaloSupportDirectoryNeedsMigration(NSURL *directory);

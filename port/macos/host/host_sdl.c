@@ -115,14 +115,16 @@ static int metal_swap_interval = 1;
 #endif
 #ifndef HALO_IOS
 static int command_held;
+static int game_backgrounded;
 #endif
 
 /* ---------- general */
 
 int host_sdl_init(uint32_t flags) {
 #ifndef HALO_IOS
-    /* Handle close requests ourselves so Command-W does not also queue
-       SDL_EVENT_QUIT while W is being used to move. */
+    /* Handle close requests ourselves. Command-W must not hide the game
+       while W is used to move. The close button hides the window and
+       leaves the process running. Command-Q still quits. */
     SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
 #endif
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -167,8 +169,10 @@ static void SDLCALL ios_refresh_hint(void *unused) { (void)unused; }
    released. Border resizing is provided by the normal Cocoa window frame. */
 static SDL_HitTestResult SDLCALL window_hit_test(SDL_Window *window, const SDL_Point *point, void *unused) {
     (void)unused;
+    /* The close button occupies the left of this band. */
     if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) &&
-        !SDL_GetWindowRelativeMouseMode(window) && point->y >= 6 && point->y < 24)
+        !SDL_GetWindowRelativeMouseMode(window) &&
+        point->y >= 6 && point->y < 24 && point->x >= 56)
         return SDL_HITTEST_DRAGGABLE;
     return SDL_HITTEST_NORMAL;
 }
@@ -245,11 +249,34 @@ void host_sdl_release_mouse(void) {
     event.user.code = HALO_NATIVE_MOUSE_RELEASE;
     SDL_PushEvent(&event);
 }
-void host_sdl_show_game(void) {
-    if (metal_window) {
-        SDL_RaiseWindow(metal_window);
-        host_sdl_release_mouse();
+int host_sdl_game_is_background(void) { return game_backgrounded; }
+void host_sdl_background_game(void) {
+    if (!metal_window || game_backgrounded) return;
+    /* Leave full screen without changing the saved display mode. Showing
+       the game again restores it from that mode. */
+    if (SDL_GetWindowFlags(metal_window) & SDL_WINDOW_FULLSCREEN) {
+        if (!SDL_SetWindowFullscreen(metal_window, false))
+            host_logf(HOST_LOG_WARN, "The window could not leave full screen before hiding");
+        SDL_SyncWindow(metal_window);
+        host_menu_style_window(metal_window);
     }
+    host_sdl_release_mouse();
+    SDL_HideWindow(metal_window);
+    game_backgrounded = 1;
+    host_menu_note_background(1);
+    host_logf(HOST_LOG_INFO, "The window is hidden. MeshCE keeps introducing peers until you quit from the menu bar");
+}
+void host_sdl_show_game(void) {
+    if (!metal_window) return;
+    int hidden = game_backgrounded;
+    game_backgrounded = 0;
+    SDL_ShowWindow(metal_window);
+    SDL_RaiseWindow(metal_window);
+    if (hidden) {
+        host_menu_note_background(0);
+        host_menu_window_changed();
+    }
+    host_sdl_release_mouse();
 }
 void host_sdl_request_quit(void) {
     SDL_Event event = {.type = SDL_EVENT_QUIT};
@@ -476,13 +503,25 @@ int host_sdl_poll_event(void *event) {
                        host_event.key.scancode == SDL_SCANCODE_RGUI
                            ? host_event.key.down : (host_event.key.mod & SDL_KMOD_GUI) != 0;
     }
+    if (host_event.type == SDL_EVENT_KEY_DOWN &&
+        host_event.key.scancode == SDL_SCANCODE_H &&
+        (host_event.key.mod & SDL_KMOD_GUI) &&
+        !(host_event.key.mod & (SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_CTRL))) {
+        /* Full screen hides the menu bar and the close button. Command-H
+           still hides the window, and it leaves the saved display mode alone. */
+        host_sdl_background_game();
+        memset(event, 0, sizeof(host_event));
+        return 1;
+    }
     if (host_event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         if (command_held) {
             host_logf(HOST_LOG_INFO, "Command-W does not close the game; use Command-Q to quit");
             memset(event, 0, sizeof(host_event));
             return 1;
         }
-        host_event.type = SDL_EVENT_QUIT;
+        host_sdl_background_game();
+        memset(event, 0, sizeof(host_event));
+        return 1;
     }
 #endif
     /* Cocoa sends opened URLs as drop-file events. Consume the native
@@ -521,8 +560,8 @@ int host_sdl_show_simple_message_box(uint32_t flags, const char *title, const ch
     return SDL_ShowSimpleMessageBox(flags, title, message, metal_window);
 }
 
-/* the mods question at startup (port_mods.c): the guest only gets the
-button that was chosen, and -1 when the box cannot be shown */
+/* a question with up to three buttons: the guest only gets the button that
+was chosen, and -1 when the box cannot be shown */
 int host_sdl_show_message_box(uint32_t flags, const char *title, const char *message, int default_index,
     const char *button0, const char *button1, const char *button2) {
     const char *labels[3] = { button0, button1, button2 };

@@ -76,7 +76,7 @@ def updater_defines(release: bool) -> str:
     channel = os.environ.get("HALO_BUILD_CHANNEL", "main")
     if channel not in ("main", "testing"):
         raise RuntimeError("HALO_BUILD_CHANNEL must be main or testing")
-    repository = os.environ.get("HALO_UPDATE_REPOSITORY", "mastercheese-dev/OpenCE")
+    repository = os.environ.get("HALO_UPDATE_REPOSITORY", "bitmoda/MeshCE")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise RuntimeError("HALO_UPDATE_REPOSITORY must be owner/name")
     flavor = "release" if release else "debug"
@@ -321,7 +321,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         description="WINDOWS RC $out",
     )
     resources = BUILD / "halo.res"
-    n.build(outputs=resources, rule="windows_rc", inputs=PORT_DIR / "halo.rc", implicit=[PORT_DIR / "opence-icon.ico"])
+    n.build(outputs=resources, rule="windows_rc", inputs=PORT_DIR / "halo.rc", implicit=[PORT_DIR / "meshce-icon.ico"])
     n.rule(
         name="windows_copy",
         command="$python -c \"import shutil,sys; shutil.copyfile(sys.argv[1], sys.argv[2])\" $in $out",
@@ -560,11 +560,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
     emit(obj_dir, output, lto_cflags + profile_use_flags(profile),
          lto_cflags + [OPTIMISATION] if lto_cflags else [], [], [profile] if profile else [])
     n.build(outputs=sdl_dll, rule="windows_copy", inputs=SDL_DIR / "lib" / "x86" / "SDL3.dll")
-    # internet play's MQTT brokers, a file beside the game (network.brokers_file)
-    brokers = BUILD / "brokers.txt"
-    n.build(outputs=brokers, rule="windows_copy", inputs=Path("port/assets/network/brokers.txt"))
     # the match and campaign loading film, beside the game
     film = BUILD / "opening_frames.bin"
     n.build(outputs=film, rule="windows_copy", inputs=Path("port/assets/opening/opening_frames.bin"))
-    n.build(outputs="windows", rule="phony", inputs=[output, sdl_dll, brokers, film])
+    n.build(outputs="windows", rule="phony", inputs=[output, sdl_dll, film])
     n.newline()

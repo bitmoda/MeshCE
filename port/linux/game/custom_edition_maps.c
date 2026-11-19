@@ -462,6 +462,10 @@ static void custom_edition_maps_look_for(
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
+	/* This client plays the original Xbox maps. custom_maps is not listed. */
+	(void)folders;
+	(void)folder_index;
+	return;
 	if (!halo_custom_edition_tag_cache())
 	{
 		return;

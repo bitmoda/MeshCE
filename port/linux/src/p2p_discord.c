@@ -4,13 +4,13 @@ P2P_DISCORD.C
 Discord invites for internet play (p2p.c), through the Discord desktop
 client's local RPC socket (a Unix socket, or a named pipe on Windows):
 while hosting, the game's activity carries a private party whose join
-secret is the invite. Discord shows the game as OpenCE, with the OpenCE
+secret is the invite. Discord shows the game as MeshCE, with the MeshCE
 icon on the presence and on the invite. The host can send the invite, and
 an ask to join is accepted, so either way the other person joins.
 
 It goes through the Discord application in discord.application_id
-(config.toml; the project's by default). The activity names the game OpenCE
-and uses the OpenCE wordmark. Without an application id, or without Discord
+(config.toml; the project's by default). The activity names the game MeshCE
+and uses the MeshCE icon. Without an application id, or without Discord
 running, invites are still links (p2p.c).
 
 The protocol: frames of a little-endian opcode and length, then JSON. The
@@ -161,11 +161,11 @@ static void send_activity(void)
 	{
 		size = snprintf(json, sizeof(json),
 			"{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%lu\",\"args\":{\"pid\":%lu,\"activity\":{"
-			"\"name\":\"OpenCE\",\"type\":0,"
+			"\"name\":\"MeshCE\",\"type\":0,"
 			"\"details\":\"Hosting a game\",\"state\":\"Invite only\","
 			/* the image uploaded as "logo" under the application's Rich
 			Presence art assets */
-			"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Halo: Combat Evolved\","
+			"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"MeshCE\","
 			"\"invite_cover_image\":\"logo\"},"
 			"\"party\":{\"id\":\"%s\",\"size\":[%d,%d]},"
 			"\"secrets\":{\"join\":\"%s\"},\"instance\":false}}}",
@@ -177,7 +177,7 @@ static void send_activity(void)
 		size = snprintf(json, sizeof(json),
 			"{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%lu\",\"args\":{\"pid\":%lu,\"activity\":{"
 			"\"details\":\"In Menus\","
-			"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Halo: Combat Evolved\"},"
+			"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"MeshCE\"},"
 			"\"instance\":false}}}",
 			++discord.nonce, (unsigned long)posix_process_id());
 	}
@@ -377,7 +377,7 @@ void p2p_discord_update(void)
 			running; the game then receives the invite once connected */
 			snprintf(scheme, sizeof(scheme), "discord-%s", application);
 			/* (it lets go of the p2p lock while it may wait) */
-			p2p_register_url_scheme(scheme, "OpenCE");
+			p2p_register_url_scheme(scheme, "MeshCE");
 		}
 	}
 	if (!discord.enabled)

@@ -634,7 +634,7 @@ int posix_user_secret(unsigned char *secret, int size)
 	(void)size;
 	return 0;
 #else
-	/* the same key file OpenCE reads: the user's runtime directory, else
+	/* the same key file MeshCE reads: the user's runtime directory, else
 	their home */
 	const char *runtime = getenv("XDG_RUNTIME_DIR");
 	const char *home = getenv("HOME");

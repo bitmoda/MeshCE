@@ -70,6 +70,8 @@ void hardcore_rules_setup_apply(struct game_variant *variant);
 0 until that screen has faded out and the players are in with their weapons. */
 void hardcore_rules_hold_pregame(void);
 boolean hardcore_rules_opening_hold(void);
+/* How long the sweep plays before a match may leave it. */
+unsigned long hardcore_rules_opening_sweep_ms(void);
 /* The film is leaving. The match is drawn under it. */
 boolean hardcore_rules_opening_fading(void);
 /* This machine's world is finished: players armed, the opening items down,

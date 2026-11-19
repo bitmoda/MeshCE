@@ -455,6 +455,9 @@ symbols in this file:
 #include "game/game_engine.h"
 #include "../../port/linux/game/hardcore_rules.h"
 #include "../../port/linux/src/matchmaking.h"
+#include "../../port/linux/game/network_votekick.h"
+#include "memory/data.h"
+#include "../../port/linux/include/peer_mesh.h"
 #include "game/performance_variant.h"
 #ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 #include "../../port/linux/game/performance_options.h"
@@ -779,6 +782,8 @@ static boolean network_game_server_idle_postgame_tasks(
 static boolean network_game_server_have_all_machines_have_precached(
 	struct network_game_server *server);
 static boolean network_game_server_idle_pregame_tasks(
+	struct network_game_server *server);
+static int network_game_server_human_count(
 	struct network_game_server *server);
 static void network_game_server_send_rejection_message(
 	struct transport_endpoint *endpoint,
@@ -1287,13 +1292,9 @@ network_game_server_named_machine finds it) banned */
 boolean network_game_server_ban_player(
 	char const *text)
 {
-	long machine_index;
-	char names[96];
-
-	if (!network_game_server_named_machine("ban", text, &machine_index, names, sizeof(names)))
-		return FALSE;
-	network_game_server_ban_machine(machine_index, names);
-	return TRUE;
+	(void)text;
+	console_warning("use votekick. a host does not ban");
+	return FALSE;
 }
 
 /* port: the host's kick command: the player's machine (as the ban
@@ -1301,13 +1302,9 @@ command's) kicked */
 boolean network_game_server_kick_player(
 	char const *text)
 {
-	long machine_index;
-	char names[96];
-
-	if (!network_game_server_named_machine("kick", text, &machine_index, names, sizeof(names)))
-		return FALSE;
-	network_game_server_kick_named_machine(machine_index, names);
-	return TRUE;
+	(void)text;
+	console_warning("use votekick. a host does not kick");
+	return FALSE;
 }
 
 /* port: the host's Kick and Ban on the scoreboard (game_engine.c): the
@@ -1317,27 +1314,9 @@ boolean network_game_server_kick_machine_of_player(
 	long machine_index,
 	boolean ban)
 {
-	struct network_game_server *server = global_network_game_server_get();
-	char names[96];
-
-	if (!server)
-	{
-		console_warning("%s: only the host of a game does this", ban ? "ban" : "kick");
-		return FALSE;
-	}
-	if (!VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) ||
-		!network_game_server_client_machine_is_joined_to_game(server, &server->client_machines[machine_index]) ||
-		network_game_server_client_machine_is_local(server, &server->client_machines[machine_index]))
-	{
-		console_warning("%s: not a player of the host's own machine, nor one not joined", ban ? "ban" : "kick");
-		return FALSE;
-	}
-	network_game_server_machine_names(server, machine_index, names, sizeof(names));
-	if (ban)
-		network_game_server_ban_machine(machine_index, names);
-	else
-		network_game_server_kick_named_machine(machine_index, names);
-	return TRUE;
+	(void)machine_index;
+	console_warning("use votekick. a host does not %s", ban ? "ban" : "kick");
+	return FALSE;
 }
 
 /* port: a client machine's hardware id as it told it joining (its join
@@ -1396,6 +1375,134 @@ void network_game_server_kick_machine(
 		return;
 	}
 	network_game_server_kick_pending[machine_index] = kept_out ? _kick_kept_out : _kick_rejoinable;
+}
+
+short network_game_server_seated_machines(
+	long *machines,
+	short maximum)
+{
+	struct network_game_server *server;
+	short count;
+	long index;
+
+	server = global_network_game_server_get();
+	count = 0;
+	if (!server || !machines || maximum < 1)
+		return 0;
+	for (index = 0; index < (long)NUMBEROF(server->game.players); index++)
+	{
+		struct network_player *player;
+		long machine;
+		short seen;
+
+		player = &server->game.players[index];
+		if (!network_player_is_valid(player))
+			continue;
+		if (bot_controller_is_bot(player->machine_index, player->controller_index))
+			continue;
+		machine = (long)(short)player->machine_index;
+		if (!VALID_INDEX(machine, MAXIMUM_NETWORK_MACHINE_COUNT))
+			continue;
+		for (seen = 0; seen < count; seen++)
+		{
+			if (machines[seen] == machine)
+				break;
+		}
+		if (seen == count && count < maximum)
+			machines[count++] = machine;
+	}
+	return count;
+}
+
+long network_game_server_local_machine_index(
+	void)
+{
+	struct network_game_server *server;
+	short local;
+	long index;
+
+	local = network_game_client_get_local_machine_index();
+	if (local != (short)NONE)
+		return local;
+	server = global_network_game_server_get();
+	if (!server)
+		return NONE;
+	for (index = 0; index < MAXIMUM_NETWORK_MACHINE_COUNT; index++)
+	{
+		if (network_game_server_client_machine_is_local(server, &server->client_machines[index]))
+			return index;
+	}
+	return NONE;
+}
+
+boolean network_game_server_machine_is_local(
+	long machine_index)
+{
+	struct network_game_server *server;
+
+	server = global_network_game_server_get();
+	if (!server || !VALID_INDEX(machine_index, MAXIMUM_NETWORK_MACHINE_COUNT))
+		return FALSE;
+	return network_game_server_client_machine_is_local(server, &server->client_machines[machine_index]);
+}
+
+void network_game_server_drop_local_players(
+	void)
+{
+	struct network_game_server *server;
+	struct network_game_client *client;
+	struct network_game *local_game;
+	struct data_iterator iterator;
+	struct player_datum *datum;
+	short local;
+	long index;
+
+	server = global_network_game_server_get();
+	client = global_network_game_client_get();
+	local_game = client ? network_game_client_get_game(client) : NULL;
+	local = (short)network_game_server_local_machine_index();
+	if (server && local != (short)NONE)
+	{
+		for (index = 0; index < (long)NUMBEROF(server->game.players); index++)
+		{
+			struct network_player *player;
+
+			player = &server->game.players[index];
+			if (!network_player_is_valid(player) || (short)player->machine_index != local)
+				continue;
+			network_votekick_block_local((short)player->controller_index);
+			if (local_game)
+				network_game_remove_player(local_game, player);
+			network_game_remove_player(&server->game, player);
+		}
+	}
+	if (player_data)
+	{
+		data_iterator_new(&iterator, player_data);
+		while ((datum = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (datum->local_player_index == (short)NONE)
+				continue;
+			network_votekick_block_local(datum->local_player_index);
+			datum->quit_out_of_game = TRUE;
+		}
+	}
+}
+
+void network_game_server_machine_player_names(
+	long machine_index,
+	char *names,
+	long names_size)
+{
+	struct network_game_server *server;
+
+	if (!names || names_size < 1)
+		return;
+	names[0] = 0;
+	server = global_network_game_server_get();
+	if (!server)
+		return;
+	network_game_server_machine_names(server, machine_index, names, names_size);
 }
 
 /* (a client machine's player queued to add in game: one refused is as one
@@ -1711,6 +1818,19 @@ boolean network_game_server_idle(
 	/* (what Discord shows of a game hosted for internet play, and the
 	server browser's listing) */
 	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
+	/* a full matchmaking lobby stops inviting. a seat that opens starts again. */
+	if (matchmaking_game_port())
+	{
+		int humans = network_game_server_human_count(server);
+
+		/* the server's list, every tick. the lobby screen can be looking at
+		the local client's copy, which still has one player after someone
+		has joined. */
+		peer_mesh_set_game_humans(humans);
+		peer_mesh_set_game_machines(server->game.machine_count);
+		peer_mesh_set_lobby_full(server->game.maximum_players > 0 &&
+			humans >= server->game.maximum_players);
+	}
 	network_game_server_list(server);
 
 	if (network_game_server_game_is_valid(server))
@@ -2045,6 +2165,72 @@ boolean network_game_server_start_network_game(
 	return success;
 }
 
+struct network_game_server_quit_note
+{
+	int used;
+	int machine;
+	int controller;
+	long tick;
+};
+
+static struct network_game_server_quit_note network_game_server_quit_notes[16];
+
+static void network_game_server_clear_quits(
+	void)
+{
+	csmemset(network_game_server_quit_notes, 0, sizeof(network_game_server_quit_notes));
+}
+
+void network_game_server_remember_quit(
+	int machine,
+	int controller,
+	long tick)
+{
+	int index;
+	int open;
+
+	if (machine < 0 || controller < 0 || tick <= 0)
+		return;
+	open = -1;
+	for (index = 0; index < (int)NUMBEROF(network_game_server_quit_notes); index++)
+	{
+		if (!network_game_server_quit_notes[index].used)
+		{
+			if (open < 0)
+				open = index;
+			continue;
+		}
+		if (network_game_server_quit_notes[index].machine == machine &&
+			network_game_server_quit_notes[index].controller == controller)
+		{
+			network_game_server_quit_notes[index].tick = tick;
+			return;
+		}
+	}
+	if (open < 0)
+		return;
+	network_game_server_quit_notes[open].used = 1;
+	network_game_server_quit_notes[open].machine = machine;
+	network_game_server_quit_notes[open].controller = controller;
+	network_game_server_quit_notes[open].tick = tick;
+}
+
+long network_game_server_recall_quit(
+	int machine,
+	int controller)
+{
+	int index;
+
+	for (index = 0; index < (int)NUMBEROF(network_game_server_quit_notes); index++)
+	{
+		if (network_game_server_quit_notes[index].used &&
+			network_game_server_quit_notes[index].machine == machine &&
+			network_game_server_quit_notes[index].controller == controller)
+			return network_game_server_quit_notes[index].tick;
+	}
+	return NONE;
+}
+
 static void network_game_server_send_player_quit_messages_ingame(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine)
@@ -2068,6 +2254,7 @@ static void network_game_server_send_player_quit_messages_ingame(
 
 			remove_player.player = *player;
 			remove_player.reason = game_time_get() + NETWORK_GAME_PLAYER_QUIT_DELAY;
+			network_game_server_remember_quit(player->machine_index, player->controller_index, remove_player.reason);
 
 			error(_error_silent, "sending quit out of game, time = %x", remove_player.reason);
 
@@ -2437,6 +2624,7 @@ void network_game_server_all_machines_have_loaded(
 
 	network_event("all machines have successfully loaded");
 
+	network_game_server_clear_quits();
 	server->state = _network_game_server_state_ingame;
 	server->time_of_first_client_loading_completion = 0;
 	/* (the machines that loaded first waited in silence: their timeouts
@@ -2576,6 +2764,7 @@ static void network_game_server_remove_players_gone_while_loading(
 			continue;
 		remove_player.player = *player;
 		remove_player.reason = game_time_get() + NETWORK_GAME_PLAYER_QUIT_DELAY;
+		network_game_server_remember_quit(player->machine_index, player->controller_index, remove_player.reason);
 		message = create_network_game_message(_message_server_remove_player_ingame, &remove_player,
 			sizeof(remove_player));
 		if (message && !network_game_server_send_message_to_all_machines(server, message))
@@ -3322,7 +3511,15 @@ void network_game_server_late_joiner_loaded(
 			if (!network_player_is_valid(player) || network_game_server_player_among(player, server->game.players, count))
 				continue;
 			remove_player.player = *player;
-			remove_player.reason = game_time_get();
+			remove_player.reason = network_game_server_recall_quit(player->machine_index, player->controller_index);
+			if (remove_player.reason <= 0)
+			{
+				remove_player.reason = game_time_get();
+				if (remove_player.reason <= 0)
+					remove_player.reason = 1;
+				network_game_server_remember_quit(player->machine_index, player->controller_index,
+					remove_player.reason);
+			}
 			message = create_network_game_message(_message_server_remove_player_ingame, &remove_player,
 				sizeof(remove_player));
 			if (message)
@@ -5357,6 +5554,35 @@ static boolean network_game_server_have_all_machines_have_precached(
 	return all_machines_have_precached;
 }
 
+static int network_game_server_human_count(struct network_game_server *server)
+{
+	int count = 0;
+	long itr;
+
+	for (itr = 0; itr < MAXIMUM_NETWORK_PLAYER_COUNT; itr++)
+	{
+		struct network_player *player = &server->game.players[itr];
+
+		if (!network_player_is_valid(player))
+			continue;
+		if (bot_controller_is_bot(player->machine_index, player->controller_index))
+			continue;
+		count++;
+	}
+	return count;
+}
+
+int network_game_server_seated_human_count(
+	void)
+{
+	struct network_game_server *server;
+
+	server = global_network_game_server_get();
+	if (!server)
+		return 0;
+	return network_game_server_human_count(server);
+}
+
 static boolean network_game_server_idle_pregame_tasks(
 	struct network_game_server *server)
 {
@@ -5490,19 +5716,29 @@ static boolean network_game_server_idle_pregame_tasks(
 				{
 					unsigned long wanted = matchmaking_countdown_ms();
 					long remaining;
+					int humans = network_game_server_human_count(server);
+					int seats_short = matchmaking_seats_unfilled(humans);
 
 					if (matchmaking_wait_omitted() &&
 						server->game.maximum_players > 0 &&
 						server->game.player_count >= server->game.maximum_players)
 						wanted = 0;
+					/* Advertised seats can make the search look full. The
+					match waits until that many players are actually here. */
+					if (seats_short)
+						wanted = 15000UL;
 					remaining = countdown_timer_get_time_remaining(&server->countdown_state.timer);
-					if (remaining > (long)wanted)
+					if (seats_short && remaining < (long)wanted)
+						countdown_timer_set_time_remaining(&server->countdown_state.timer, (long)wanted);
+					else if (remaining > (long)wanted)
 						countdown_timer_set_time_remaining(&server->countdown_state.timer, (long)wanted);
 				}
 			if (countdown_timer_get_time_remaining(
 				&server->countdown_state.timer) == 0 &&
 				network_game_server_have_all_machines_have_precached(server) &&
-				server->countdown_state.paused == FALSE)
+				server->countdown_state.paused == FALSE &&
+				!(matchmaking_game_port() &&
+					matchmaking_seats_unfilled(network_game_server_human_count(server))))
 			{
 				/* (the game stays open: a machine may join it in progress,
 				network_game_server_start_late_joiner) */

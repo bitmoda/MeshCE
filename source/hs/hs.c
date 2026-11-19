@@ -11708,8 +11708,8 @@ static struct hs_function_definition const sv_end_game_definition=
 	0,
 };
 
-/* port: the mods' tags played over the map's on this machine
-(the main menu's Mods: port/linux/game/mods.c), at the console */
+/* port: the console names stay, and do nothing. The map's own tags are played
+(port/linux/game/mods.c) */
 void mods_reload(void);
 void mods_enable(boolean enabled);
 void mods_list(void);
@@ -11725,7 +11725,7 @@ static struct hs_function_definition const mods_reload_definition=
 	"mods_reload",
 	hs_macro_function_parse,
 	hs_mods_reload_evaluate,
-	"finds the mods again and reads their tag files again (all sounds stop if any changed).",
+		"does nothing. The map's own tags are played.",
 	NULL,
 	0,
 };
@@ -11738,7 +11738,7 @@ static struct hs_function_definition_with_1_parameter const mods_enable_definiti
 		"mods_enable",
 		hs_macro_function_parse,
 		hs_mods_enable_evaluate,
-		"plays the mods' sounds, bitmaps, text and models, or (false) the map's own, until the map changes.",
+		"does nothing. The map's own tags are played.",
 		NULL,
 		1,
 		{ _hs_type_boolean },
@@ -11752,7 +11752,7 @@ static struct hs_function_definition const mods_list_definition=
 	"mods_list",
 	hs_macro_function_parse,
 	hs_mods_list_evaluate,
-	"lists the mods in the mods folder, and what they play on this map.",
+	"does nothing. The map's own tags are played.",
 	NULL,
 	0,
 };
@@ -15629,17 +15629,9 @@ static boolean hs_compile_and_evaluate_command(
 			kick = TRUE;
 		if (text)
 		{
-			char name[64];
-			long length = 0;
-
-			while (*text == ' ' || *text == '\t' || *text == '"')
-				text++;
-			while (*text && *text != '"' && *text != ')' && length < (long)sizeof(name) - 1)
-				name[length++] = *text++;
-			while (length > 0 && (name[length - 1] == ' ' || name[length - 1] == '\t'))
-				length--;
-			name[length] = 0;
-			return kick ? network_game_server_kick_player(name) : network_game_server_ban_player(name);
+			(void)kick;
+			console_warning("use votekick. a host does not ban or kick");
+			return TRUE;
 		}
 	}
 	csstrncpy(buffer, expression, sizeof(buffer));

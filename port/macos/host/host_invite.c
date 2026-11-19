@@ -20,8 +20,38 @@ int host_invite_received(const char *text) {
     static const char prefix[] = "halo://join/";
     const size_t prefix_size = sizeof(prefix) - 1;
     const size_t code_size = 2 * (P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE);
-    if (!text || strncmp(text, prefix, prefix_size) || strlen(text) != prefix_size + code_size ||
-        strspn(text + prefix_size, "0123456789abcdefABCDEF") != code_size)
+    const char *code;
+    size_t hex;
+    if (!text || strncmp(text, prefix, prefix_size))
+        return 0;
+    code = text + prefix_size;
+    hex = strspn(code, "0123456789abcdefABCDEF");
+    if (hex != code_size)
+        return 0;
+    if (code[hex] == '.') {
+        size_t extra = strspn(code + hex + 1,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_+/" );
+        const char *tail;
+        if (extra < 1)
+            return 0;
+        tail = code + hex + 1 + extra;
+        if (*tail == '?') {
+            unsigned long port = 0;
+            if (strncmp(tail, "?port=", 6) != 0)
+                return 0;
+            tail += 6;
+            if (*tail < '0' || *tail > '9')
+                return 0;
+            for (; *tail >= '0' && *tail <= '9'; tail++) {
+                port = port * 10u + (unsigned long)(*tail - '0');
+                if (port >= 65536)
+                    return 0;
+            }
+            if (*tail != 0 || port == 0)
+                return 0;
+        } else if (*tail != 0)
+            return 0;
+    } else if (code[hex] != 0)
         return 0;
     const char *saves = getenv("HALO_SAVE_ROOT");
     if (!saves || !*saves)

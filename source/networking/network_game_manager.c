@@ -79,6 +79,7 @@ symbols in this file:
 #include "cseries/cseries.h"
 #include "cseries/errors.h"
 #include "game/game.h"
+#include "../../port/linux/src/matchmaking.h"
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "interface/player_ui.h"
@@ -605,6 +606,14 @@ void network_game_reset_for_next_round(
 			game_connection_set(2);
 		else if (global_network_game_client_get())
 			game_connection_set(1);
+		/* The lobby stays up. The menu map's scripts move the camera
+		behind it, the way they do for a lobby opened from the
+		multiplayer menu. */
+		if (matchmaking_game_port())
+		{
+			main_menu_scene_resume();
+			return;
+		}
 	}
 	else
 	{
@@ -795,6 +804,12 @@ boolean network_game_create_game_objects(
 			break;
 	}
 
+	/* A map already in the cache never entered the copy, so the queue used
+	to keep running after the match had started and the scoreboard was
+	never opened. Every network game stops the queue here, once. */
+	if (game_connection() == _game_connection_network_client ||
+		game_connection() == _game_connection_network_server)
+		matchmaking_stop();
 	game_precache_new_map(options.map_name, TRUE);
 	main_menu_unload();
 
