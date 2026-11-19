@@ -27,6 +27,8 @@
 
 Mesh matchmaking is how players find a game. On the multiplayer menu, Find Game searches Free for all, 2v2, and Ranked. The search runs on the players' own computers. A new install says hello to the built-in introducer, `bitmoda.ddns.net`, and to players that machine has already heard. Players on the same local network are found by broadcast, and a player met before is tried again at the saved address. The player with the best connection hosts. Rank and games played change for a match found this way. A custom game joined from an invite link leaves them unchanged. Mac, Windows, and Linux speak network version 42. See [docs/peer-mesh.md](docs/peer-mesh.md).
 
+Closing the window, or choosing Quit in the game, hides MeshCE and leaves it running. It keeps introducing players on the mesh. Quit from the tray icon on Windows and Linux, or from the menu bar icon on Mac, to stop it.
+
 The mesh and the game use these UDP ports. Allow them inbound and outbound in the firewall. On Mac, allow MeshCE when the system asks to find devices on the local network. That permission is the broadcast on 38952. On Windows, allow `halo.exe` when the firewall asks.
 
 | Port | Use |
