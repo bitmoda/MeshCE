@@ -1,0 +1,634 @@
+#!/usr/bin/env python3
+"""Build the native Apple Silicon host, rebased game, and local .app bundle."""
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import base64
+import json
+import os
+from pathlib import Path
+import plistlib
+import re
+import shlex
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import zlib
+from urllib.parse import urlparse
+from xml.parsers.expat import ExpatError
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.linux_build import MINIUPNPC_DEFINES, MINIUPNPC_DIR, miniupnpc_sources
+from tools.macos_menu_icon import render as render_menu_icon
+from tools.macos_sparkle import setup_sparkle, DIRECTORY as SPARKLE_DIRECTORY
+from tools.macos_content_tools import stage_content_tools
+BUILD = ROOT / "build/macos"
+LLVM = Path(os.environ.get("HALO_MACOS_LLVM_BIN", "/opt/homebrew/opt/llvm@22/bin"))
+SDL = Path(os.environ.get("HALO_MACOS_SDL_PREFIX", "/opt/homebrew/opt/sdl3"))
+ANGLE = Path(os.environ.get("HALO_MACOS_ANGLE_DIR", str(ROOT / "build/macos/angle/dist")))
+RENDERER = "metal"
+
+
+def use_renderer(renderer):
+    global BUILD, RENDERER
+    if renderer not in ("metal", "angle"):
+        raise RuntimeError(f"Unknown renderer {renderer}")
+    RENDERER = renderer
+    BUILD = ROOT / ("build/macos-metal" if renderer == "metal" else "build/macos")
+GL = BUILD / "toolchain/gl"
+APP_ICON = "AppIcon.icns"
+APP_VERSION = "0.3.0"
+APP_BUILD = "12"
+APP_NAME = "OpenCE"
+LEGACY_APP_NAMES = ()
+
+
+def run(*args):
+    subprocess.run([str(arg) for arg in args], cwd=ROOT, check=True)
+
+
+def require(path):
+    if not path.exists():
+        raise RuntimeError(f"Missing build dependency: {path}. See port/macos/README.md.")
+    return path
+
+
+def build_plugin():
+    BUILD.mkdir(parents=True, exist_ok=True)
+    require(LLVM / "llvm-config")
+    flags = shlex.split(subprocess.check_output(
+        [LLVM / "llvm-config", "--cxxflags", "--ldflags", "--libs", "core", "passes"], text=True))
+    sdk = os.environ.get("SDKROOT") or subprocess.check_output(
+        ["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
+    run(LLVM / "clang++", "-shared", "-fPIC", "port/macos/compiler/guest_rebase.cpp",
+        "-o", BUILD / "guest_rebase.dylib", "-isysroot", sdk, *flags)
+
+
+def resolve_update_build(explicit):
+    """This app's Mac release number. A newer tag on OpenCommunityEdition/OpenCE is offered.
+    Zero does not look. The guest updater does not run in this build."""
+    if explicit is None:
+        raw = os.environ.get("HALO_MAC_UPDATE_BUILD", "0")
+        if not re.fullmatch(r"\d+", raw):
+            raise RuntimeError("HALO_MAC_UPDATE_BUILD must be a whole number")
+        explicit = int(raw)
+    if explicit < 0:
+        raise RuntimeError("The Mac update build must be zero or greater")
+    return explicit
+
+
+def resolve_update_channel(explicit):
+    """main follows build-N. testing follows testing-N prereleases. The
+    installed app records this so turning testing off can return to main."""
+    if explicit is None:
+        explicit = os.environ.get("HALO_MAC_UPDATE_CHANNEL", "main")
+    if explicit not in ("main", "testing"):
+        raise RuntimeError("The Mac update channel must be main or testing")
+    return explicit
+
+
+def build_host(update_build):
+    native_metal = RENDERER == "metal"
+    sparkle = setup_sparkle()
+    obj_dir = BUILD / "host-obj"
+    obj_dir.mkdir(parents=True, exist_ok=True)
+    frameworks = [] if native_metal else [ANGLE / f"{name}.xcframework/macos-arm64" for name in ("EGL", "GLESv2")]
+    if not native_metal:
+        for name, directory in zip(("libEGL", "libGLESv2"), frameworks):
+            require(directory / f"{name}.framework" / name)
+        # EGL's loader also uses this name beside the EGL binary.
+        companion = frameworks[0] / "libEGL.framework/libGLESv2.dylib"
+        companion_target = frameworks[1] / "libGLESv2.framework/libGLESv2"
+        if companion.is_symlink() and companion.resolve() != companion_target.resolve():
+            companion.unlink()
+        if not companion.exists():
+            companion.symlink_to(companion_target)
+    mbedtls = ROOT / "port/third_party/mbedtls"
+    flags = ["-arch", "arm64", "-mmacosx-version-min=14.0", "-O2", "-g", "-DHALO_MACOS=1", "-D_DARWIN_C_SOURCE",
+             "-Wall", "-Wextra", "-Wno-unused-function", "-Wno-unused-parameter",
+             "-I.", "-Iport/macos/host", "-Iport/macos/native", "-Iport/macos/include",
+             "-Iport/android/include", "-Iport/linux/src",
+             f"-I{SDL / 'include'}",
+             *([] if native_metal else [f"-I{GL}"]),
+             *(["-DHALO_MACOS_NATIVE_METAL=1"] if native_metal else []),
+             f"-DHALO_MAC_UPDATE_BUILD={update_build}",
+             f"-I{MINIUPNPC_DIR / 'include'}", f"-I{MINIUPNPC_DIR / 'src'}", *MINIUPNPC_DEFINES]
+    sources = sorted((ROOT / "port/macos/host").glob("*.c"))
+    if native_metal:
+        sources = [source for source in sources if source.name not in ("host_gl.c", "host_gl_bridge.c", "host_perf.c")]
+    if native_metal:
+        sources += sorted((ROOT / "port/macos/host").glob("*.mm"))
+    sources += sorted((ROOT / "port/macos/native").glob("*.m"))
+    sources += [ROOT / "port/linux/src/posix_dtls.c",
+                ROOT / "port/linux/src/posix_update.c"]
+    sources += miniupnpc_sources()
+    sources += sorted((mbedtls / "library").glob("*.c"))
+    sources += [BUILD / "host/host_import_table.c", ROOT / "port/macos/host/entry.s"]
+    objects = []
+    for source in sources:
+        obj = obj_dir / (source.name + ".o")
+        native_flags = ["-fobjc-arc", "-fblocks", f"-F{sparkle.parent}"] if source.suffix in (".m", ".mm") else []
+        if source.suffix == ".mm":
+            native_flags += ["-std=c++17"]
+        quiet = ["-w"] if source.is_relative_to(mbedtls) else []
+        dtls_includes = [f"-I{mbedtls / 'include'}"] if source.name in ("posix_dtls.c", "posix_update.c") or source.is_relative_to(mbedtls) else []
+        library_include = [f"-I{mbedtls / 'library'}"] if source.is_relative_to(mbedtls) else []
+        compiler = "clang++" if source.suffix == ".mm" else "clang"
+        run(compiler, *flags, *native_flags, *quiet, *dtls_includes, *library_include, "-c", source, "-o", obj)
+        objects.append(obj)
+    link = ["clang++" if native_metal else "clang", "-arch", "arm64", "-mmacosx-version-min=14.0", *objects,
+            f"-L{SDL / 'lib'}", "-lSDL3"]
+    if native_metal:
+        link += ["-framework", "Metal", "-framework", "QuartzCore", "-framework", "CoreVideo"]
+    else:
+        link += [*(f"-F{directory}" for directory in frameworks),
+                 "-framework", "libEGL", "-framework", "libGLESv2",
+                 *(f"-Wl,-rpath,{directory}" for directory in frameworks)]
+    link += [f"-F{sparkle.parent}", "-framework", "Sparkle", "-framework", "Cocoa", "-framework", "Security",
+             f"-Wl,-rpath,{sparkle.parent}", "-o", BUILD / "halo"]
+    run(*link)
+
+
+def _paeth(left, up, up_left):
+    estimate = left + up - up_left
+    if abs(estimate - left) <= abs(estimate - up) and abs(estimate - left) <= abs(estimate - up_left):
+        return left
+    if abs(estimate - up) <= abs(estimate - up_left):
+        return up
+    return up_left
+
+
+def opaque_png(path):
+    """Drop the alpha channel. A transparent edge makes macOS draw the picture
+    inside the rounded icon instead of filling it."""
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError(f"{path} is not a PNG")
+    offset = 8
+    width = height = None
+    color_type = None
+    compressed = []
+    while offset + 8 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        kind = data[offset + 4:offset + 8]
+        chunk = data[offset + 8:offset + 8 + length]
+        offset += 12 + length
+        if kind == b"IHDR":
+            width, height, depth, color_type = struct.unpack(">IIBB", chunk[:10])
+            if depth != 8 or chunk[10] != 0:
+                raise RuntimeError(f"{path} is not an 8-bit non-interlaced PNG")
+        elif kind == b"IDAT":
+            compressed.append(chunk)
+        elif kind == b"IEND":
+            break
+    if color_type == 2:
+        return
+    if color_type != 6:
+        raise RuntimeError(f"{path} is not an RGB PNG")
+    raw = zlib.decompress(b"".join(compressed))
+    rows = []
+    cursor = 0
+    stride = width * 4
+    previous = bytearray(stride)
+    for _ in range(height):
+        filter_type = raw[cursor]
+        cursor += 1
+        row = bytearray(raw[cursor:cursor + stride])
+        cursor += stride
+        if filter_type == 1:
+            for index in range(stride):
+                row[index] = (row[index] + (row[index - 4] if index >= 4 else 0)) & 255
+        elif filter_type == 2:
+            for index in range(stride):
+                row[index] = (row[index] + previous[index]) & 255
+        elif filter_type == 3:
+            for index in range(stride):
+                left = row[index - 4] if index >= 4 else 0
+                row[index] = (row[index] + ((left + previous[index]) // 2)) & 255
+        elif filter_type == 4:
+            for index in range(stride):
+                left = row[index - 4] if index >= 4 else 0
+                up_left = previous[index - 4] if index >= 4 else 0
+                row[index] = (row[index] + _paeth(left, previous[index], up_left)) & 255
+        elif filter_type != 0:
+            raise RuntimeError(f"{path} has an unknown PNG filter")
+        previous = row
+        rows.append(bytes(row[index] for index in range(stride) if index % 4 != 3))
+    rgb = b"".join(b"\x00" + row for row in rows)
+
+    def chunk(kind, payload):
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rgb)) + chunk(b"IEND", b""))
+
+
+def package_icon(resources):
+    source = require(ROOT / "port/assets/icon/opence-icon.png")
+    with tempfile.TemporaryDirectory(prefix="halo-macos-icon-") as temporary:
+        iconset = Path(temporary) / "AppIcon.iconset"
+        iconset.mkdir()
+        images = {}
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                pixels = size * scale
+                suffix = "@2x" if scale == 2 else ""
+                target = iconset / f"icon_{size}x{size}{suffix}.png"
+                subprocess.run(["/usr/bin/sips", "-z", str(pixels), str(pixels),
+                                str(source), "--out", str(target)],
+                               check=True, stdout=subprocess.DEVNULL)
+                # sips keeps a 16-bit source. The icon package wants 8-bit.
+                jpeg = target.with_suffix(".jpg")
+                subprocess.run(["/usr/bin/sips", "-s", "format", "jpeg", str(target), "--out", str(jpeg)],
+                               check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(["/usr/bin/sips", "-s", "format", "png", str(jpeg), "--out", str(target)],
+                               check=True, stdout=subprocess.DEVNULL)
+                jpeg.unlink()
+                opaque_png(target)
+                images[(size, scale)] = target.read_bytes()
+        # PNG-backed ICNS representations avoid iconutil's rejection of valid
+        # RGB-only iconsets on some macOS SDKs; keep the existing icon artwork.
+        types = {(16, 1): b"icp4", (16, 2): b"ic11", (32, 1): b"icp5", (32, 2): b"ic12",
+                 (128, 1): b"ic07", (128, 2): b"ic13", (256, 1): b"ic08", (256, 2): b"ic14",
+                 (512, 1): b"ic09", (512, 2): b"ic10"}
+        chunks = b"".join(types[size] + struct.pack(">I", len(png) + 8) + png for size, png in images.items())
+        (resources / APP_ICON).write_bytes(b"icns" + struct.pack(">I", len(chunks) + 8) + chunks)
+
+
+def minimum_macos_version(binaries):
+    output = subprocess.check_output(["otool", "-l", *map(str, binaries)], text=True)
+    versions = []
+    for command in re.split(r"Load command \d+", output):
+        field = "minos" if "cmd LC_BUILD_VERSION" in command else "version" if "cmd LC_VERSION_MIN_MACOSX" in command else None
+        if field:
+            match = re.search(r"^\s+" + field + r" (\d+(?:\.\d+){1,2})\s*$", command, re.MULTILINE)
+            if match:
+                versions.append(match[1])
+    return max(["14.0", *versions], key=lambda value: tuple(map(int, value.split("."))))
+
+
+def update_configuration(config):
+    feed, key = config.get("feed_url"), config.get("public_update_key")
+    if not feed and not key:
+        return {}
+    url = urlparse(feed or "")
+    try:
+        valid_key = len(base64.b64decode(key or "", validate=True)) == 32
+    except (ValueError, TypeError):
+        valid_key = False
+    if url.scheme != "https" or not url.hostname or url.username or url.password or not valid_key:
+        raise RuntimeError("Configure an HTTPS feed and its matching 32-byte public Ed25519 key together")
+    return {"SUFeedURL": feed, "SUPublicEDKey": key, "SUEnableAutomaticChecks": True,
+            "SUScheduledCheckInterval": 86400}
+
+
+def package(data_root, *, sign_identity="-", release=False, version=APP_VERSION, build=APP_BUILD,
+            content_tools=None, update_build=0, update_channel="main"):
+    configuration = json.loads((ROOT / "port/macos/release-config.json").read_text())
+    if release:
+        if not update_configuration(configuration):
+            raise RuntimeError("Set Halo's update feed and public key before creating a release")
+        if not sign_identity.startswith("Developer ID Application:"):
+            raise RuntimeError("A release needs an explicit Developer ID Application signing identity")
+    destination = BUILD / (APP_NAME + ".app")
+    with tempfile.TemporaryDirectory(prefix=".halo-package-", dir=BUILD) as temporary:
+        staged = Path(temporary) / destination.name
+        package_into(staged, data_root, sign_identity=sign_identity, release=release, version=version, build=build,
+                     content_tools=content_tools, update_build=update_build, update_channel=update_channel)
+        # A fresh bundle prevents old development resources entering a release.
+        # Preserve the previous build, including a running executable's inode.
+        backup = None
+        if destination.exists():
+            backup = BUILD / "app-backups.noindex" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+            backup.mkdir(parents=True)
+            destination.rename(backup / (destination.name + ".backup"))
+        try:
+            staged.rename(destination)
+        except OSError:
+            if backup:
+                (backup / (destination.name + ".backup")).rename(destination)
+            raise
+    print(f"Built {destination}")
+
+
+def package_into(app, data_root, *, sign_identity, release, version, build, content_tools=None, update_build=0,
+                 update_channel="main"):
+    contents = app / "Contents"
+    macos = contents / "MacOS"
+    frameworks = contents / "Frameworks"
+    resources = contents / "Resources"
+    for directory in (macos, frameworks, resources):
+        directory.mkdir(parents=True, exist_ok=True)
+    executable = macos / "halo"
+    # Keep a running copy's executable inode intact during a local rebuild.
+    if executable.exists():
+        executable.unlink()
+    shutil.copy2(BUILD / "halo", executable)
+    shutil.copy2(BUILD / "halo_guest.elf", resources / "halo_guest.elf")
+    shutil.copy2(ROOT / "port/macos/map-downloads.json", resources / "map-downloads.json")
+    opening = ROOT / "port/assets/opening/opening_frames.bin"
+    if opening.is_file():
+        shutil.copy2(opening, resources / "opening_frames.bin")
+    sdl = frameworks / "libSDL3.0.dylib"
+    if sdl.exists():
+        sdl.unlink()
+    shutil.copy2(require(SDL / "lib/libSDL3.0.dylib"), sdl)
+    run("install_name_tool", "-change", str(SDL / "lib/libSDL3.0.dylib"),
+        "@rpath/libSDL3.0.dylib", executable)
+    run("install_name_tool", "-id", "@rpath/libSDL3.0.dylib", sdl)
+    angle_libraries = []
+    if RENDERER != "metal":
+        for name in ("EGL", "GLESv2"):
+            directory = ANGLE / f"{name}.xcframework/macos-arm64"
+            source = directory / f"lib{name}.framework"
+            old_framework = frameworks / source.name
+            if old_framework.exists():
+                shutil.rmtree(old_framework)
+            target = frameworks / f"lib{name}.dylib"
+            if target.exists():
+                target.unlink()
+            shutil.copy2(source / f"lib{name}", target)
+            target.chmod(0o755)
+            run("install_name_tool", "-change", f"@rpath/lib{name}.framework/lib{name}",
+                f"@rpath/lib{name}.dylib", executable)
+            run("install_name_tool", "-id", f"@rpath/lib{name}.dylib", target)
+            run("install_name_tool", "-delete_rpath", str(directory), executable)
+            angle_libraries.append(target)
+    run("install_name_tool", "-add_rpath", "@executable_path/../Frameworks", executable)
+    sparkle_source = setup_sparkle()
+    sparkle = frameworks / "Sparkle.framework"
+    if sparkle.exists():
+        shutil.rmtree(sparkle)
+    shutil.copytree(sparkle_source, sparkle, symlinks=True)
+    run("install_name_tool", "-delete_rpath", str(sparkle_source.parent), executable)
+    # Store the independently supplied data location as a configuration file;
+    # external symlinks would invalidate a strictly signed app bundle.
+    data_link = resources / "GameData"
+    if data_link.is_symlink():
+        data_link.unlink()
+    legacy_path = resources / "GameDataPath.txt"
+    if data_root is not None and not release:
+        legacy_path.write_text(str(require(data_root.resolve())) + "\n")
+    elif legacy_path.exists():
+        legacy_path.unlink()
+    render_menu_icon(ROOT / "port/macos/Helmet.svg", resources / "Helmet.pdf")
+    package_icon(resources)
+    content_binaries = stage_content_tools(app, content_tools, sign_identity=sign_identity, release=release) if content_tools else []
+    info = {
+        "CFBundleExecutable": "halo", "CFBundleIdentifier": "local.opence.apple",
+        "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
+        "CFBundleIconFile": APP_ICON,
+        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
+        "CFBundleVersion": build, "LSMinimumSystemVersion": minimum_macos_version([
+            executable, sdl, *angle_libraries, sparkle / "Sparkle", *content_binaries]),
+        "CFBundleURLTypes": [{"CFBundleURLName": "OpenCE",
+                              # Match the shared discord.application_id default.
+                              "CFBundleURLSchemes": ["halo", "discord-1553978809840050229"],
+                              "CFBundleTypeRole": "Viewer"}],
+        "NSLocalNetworkUsageDescription": "Connect to players hosting Halo multiplayer games.",
+        "NSMicrophoneUsageDescription": "Voice chat uses the microphone in network games.",
+        "NSHighResolutionCapable": True,
+        "NSHumanReadableCopyright": "Local experimental Apple Silicon port",
+    }
+    if update_build > 0:
+        if update_channel not in ("main", "testing"):
+            raise RuntimeError("The Mac update channel must be main or testing")
+        info["OpenCEMacUpdateBuild"] = update_build
+        info["OpenCEMacUpdateChannel"] = update_channel
+    configuration = json.loads((ROOT / "port/macos/release-config.json").read_text())
+    if release:
+        updates = update_configuration(configuration)
+        if not updates:
+            raise RuntimeError("Set Halo's update feed and public key before creating a release")
+        if sign_identity == "-":
+            raise RuntimeError("A release needs an explicit Developer ID Application signing identity")
+        info.update(updates)
+    with (contents / "Info.plist").open("wb") as stream:
+        plistlib.dump(info, stream)
+    try:
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                                           text=True, stderr=subprocess.DEVNULL).strip()
+        if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip():
+            revision += " (local changes)"
+    except (OSError, subprocess.CalledProcessError):
+        revision = "unknown"
+    guest_hash = hashlib.sha256((resources / "halo_guest.elf").read_bytes()).hexdigest()
+    update_line = f"Update build: {update_build}\n" if update_build > 0 else ""
+    (resources / "BuildInfo.txt").write_text(
+        f"{APP_NAME} {version} (build {build})\n"
+        f"Source: {revision}\nGuest SHA-256: {guest_hash}\n{update_line}")
+    licenses = resources / "Licenses"
+    licenses.mkdir(exist_ok=True)
+    for source, name in (
+        (ROOT / "LICENSE", "Project.txt"),
+        (ROOT / "libs/d3d8/LICENSE.GPL-3.0", "D3D8-GPL-3.0.txt"),
+        (ROOT / "port/macos/licenses/ANGLE.txt", "ANGLE.txt"),
+        (SDL / "share/licenses/SDL3/LICENSE.txt", "SDL3.txt"),
+        (ROOT / "build/android/third_party/musl-1.2.5/COPYRIGHT", "musl.txt"),
+        (ROOT / "port/third_party/kcp/LICENSE", "KCP.txt"),
+        (ROOT / "port/third_party/miniupnpc/LICENSE", "miniupnpc.txt"),
+        (ROOT / "port/third_party/tomlc17/LICENSE", "tomlc17.txt"),
+        (ROOT / "port/third_party/mbedtls/LICENSE", "mbedtls.txt"),
+        (SPARKLE_DIRECTORY / "LICENSE", "Sparkle.txt"),
+    ):
+        if source.exists():
+            shutil.copy2(source, licenses / name)
+    # Sign nested helpers before the framework and app. Development stays ad-hoc.
+    signing = ["--force", "--sign", sign_identity]
+    if release:
+        signing += ["--options", "runtime", "--timestamp"]
+    sparkle_version = sparkle / "Versions/B"
+    for helper in ("XPCServices/Installer.xpc", "XPCServices/Downloader.xpc", "Autoupdate", "Updater.app"):
+        run("codesign", *signing, "--preserve-metadata=entitlements", sparkle_version / helper)
+    run("codesign", *signing, sparkle)
+    for binary in (sdl, *angle_libraries):
+        run("codesign", *signing, binary)
+    app_signing = list(signing)
+    if release:
+        app_signing += ["--entitlements", str(ROOT / "port/macos/host.entitlements")]
+    run("codesign", *app_signing, app)
+    run("codesign", "--verify", "--deep", "--strict", app)
+
+
+def development_app_bundles(build_root):
+    """Find generated app packages without entering packages or old archives."""
+    for directory, subdirectories, _ in os.walk(build_root):
+        descend = []
+        for name in sorted(subdirectories):
+            candidate = Path(directory) / name
+            if (candidate.is_symlink() or name == "app-backups.noindex" or
+                    name.endswith(".app.backup")):
+                continue
+            if name.endswith(".app"):
+                yield candidate
+            else:
+                descend.append(name)
+        subdirectories[:] = descend
+
+
+def install_app(app, applications):
+    """Stage and verify a complete app before replacing an installed copy."""
+    app = require(app.resolve())
+    applications = applications.expanduser().resolve()
+    applications.mkdir(parents=True, exist_ok=True)
+    destination = applications / app.name
+    register = Path("/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+                    "LaunchServices.framework/Support/lsregister")
+
+    def unregister(bundle):
+        # An already-unregistered bundle returns an error. Archive it anyway;
+        # the installed app's final registration below must succeed.
+        subprocess.run([str(register), "-u", str(bundle)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    with tempfile.TemporaryDirectory(prefix=".halo-install-", dir=applications) as temporary:
+        staged = Path(temporary) / app.name
+        shutil.copytree(app, staged, symlinks=True)
+        run("codesign", "--verify", "--deep", "--strict", staged)
+        previous = None
+        if destination.exists():
+            with (destination / "Contents/Info.plist").open("rb") as stream:
+                installed = plistlib.load(stream)
+            if installed.get("CFBundleIdentifier") != "local.opence.apple":
+                raise RuntimeError(f"Another application already exists at {destination}")
+            previous = Path(tempfile.mkdtemp(prefix=".halo-previous-", dir=applications))
+            unregister(destination)
+            destination.rename(previous / (app.name + ".backup"))
+        try:
+            staged.rename(destination)
+        except OSError:
+            if previous:
+                (previous / (app.name + ".backup")).rename(destination)
+                previous.rmdir()
+                run(register, "-f", destination)
+            raise
+    # Archive this fork's previous display name after the new app is verified
+    # and installed. Preserve the old bundle and all independent user data.
+    if app.name == APP_NAME + ".app":
+        for legacy_name in LEGACY_APP_NAMES:
+            legacy = applications / legacy_name
+            info_path = legacy / "Contents/Info.plist"
+            if not info_path.is_file():
+                continue
+            try:
+                with info_path.open("rb") as stream:
+                    info = plistlib.load(stream)
+            except (OSError, plistlib.InvalidFileException, ValueError, ExpatError):
+                continue
+            if isinstance(info, dict) and info.get("CFBundleIdentifier") == "local.opence.apple":
+                archive = Path(tempfile.mkdtemp(prefix=".halo-previous-", dir=applications))
+                unregister(legacy)
+                legacy.rename(archive / (legacy.name + ".backup"))
+    # Older installers kept launchable apps in these folders. macOS follows
+    # their file identities when the installed copy is renamed to a backup.
+    for prior in (path for name in dict.fromkeys((app.name, *LEGACY_APP_NAMES))
+                  for path in applications.glob(".halo-previous-*/" + name)):
+        try:
+            with (prior / "Contents/Info.plist").open("rb") as stream:
+                info = plistlib.load(stream)
+        except (OSError, plistlib.InvalidFileException, ValueError, ExpatError):
+            continue
+        if isinstance(info, dict) and info.get("CFBundleIdentifier") == "local.opence.apple":
+            unregister(prior)
+            prior.rename(prior.with_name(prior.name + ".backup"))
+    # Spotlight can rediscover unregistered development bundles, and launching
+    # by name can then choose one of them instead of the installed version.
+    # Include renamed pilots outside build/macos, and preserve unrelated app
+    # packages (including their nested helpers) by checking the bundle ID.
+    # Preserve generated copies outside its index with a non-app extension.
+    development_root = ROOT / "build"
+    development_apps = list(development_app_bundles(development_root))
+    backup_root = BUILD / "app-backups.noindex" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    for development_app in development_apps:
+        if development_app.resolve() == destination:
+            continue
+        info_path = development_app / "Contents/Info.plist"
+        if not info_path.is_file():
+            continue
+        try:
+            with info_path.open("rb") as stream:
+                info = plistlib.load(stream)
+        except (OSError, plistlib.InvalidFileException, ValueError, ExpatError):
+            continue
+        if not isinstance(info, dict) or info.get("CFBundleIdentifier") != "local.opence.apple":
+            continue
+        unregister(development_app)
+        backup = backup_root / development_app.relative_to(development_root)
+        backup = backup.with_name(backup.name + ".backup")
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        development_app.rename(backup)
+    os.utime(destination, None)
+    run(register, "-f", destination)
+    run("mdimport", "-i", destination)
+    print(f"Installed {destination}")
+    return destination
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plugin-only", action="store_true")
+    parser.add_argument("--host-only", action="store_true")
+    parser.add_argument("--data-root", type=Path, default=ROOT / "assets")
+    parser.add_argument("--no-data-path", action="store_true", help="First launch asks for independently supplied game data")
+    parser.add_argument("--release", action="store_true", help="Developer ID signed, hardened runtime build; does not notarize or publish")
+    parser.add_argument("--sign-identity", default="-")
+    parser.add_argument("--version", default=APP_VERSION)
+    parser.add_argument("--build-number", default=APP_BUILD)
+    parser.add_argument("--update-build", type=int, default=None,
+                        help="Offer a newer Mac release from OpenCommunityEdition/OpenCE. 0 does not look.")
+    parser.add_argument("--update-channel", choices=("main", "testing"), default=None,
+                        help="main follows build-N. testing follows testing-N prereleases.")
+    parser.add_argument("--content-tools", type=Path, metavar="TOOLCHAIN_DIRECTORY",
+                        help="Opt in to reviewed Invader helpers for local community package import")
+    parser.add_argument("--install", nargs="?", const=Path("/Applications"), type=Path,
+                        metavar="DIRECTORY", help="Install in /Applications, or the given directory, for Spotlight")
+    parser.add_argument("--renderer", choices=("metal", "angle"), default="angle",
+                        help="angle draws upstream OpenGL ES through ANGLE. metal is the other frontend")
+    parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 4, 6))
+    args = parser.parse_args()
+    use_renderer(args.renderer)
+    os.chdir(ROOT)
+    if args.release:
+        if not update_configuration(json.loads((ROOT / "port/macos/release-config.json").read_text())):
+            raise RuntimeError("Choose release hosting and configure the public update key first")
+        if not args.sign_identity.startswith("Developer ID Application:"):
+            raise RuntimeError("A release needs an explicit Developer ID Application signing identity")
+    if args.plugin_only:
+        build_plugin()
+        return
+    update_build = resolve_update_build(args.update_build)
+    update_channel = resolve_update_channel(args.update_channel)
+    print(f"Fork updates: {update_channel + ' ' + str(update_build) if update_build else 'off'}")
+    # the guest clip recorder stamps this number into the file. a later
+    # build then knows the clip is from another build (clips.c)
+    os.environ["HALO_BUILD_NUMBER"] = str(update_build)
+    os.environ["HALO_BUILD_CHANNEL"] = update_channel
+    if not args.host_only:
+        llvm_bin = ROOT / "build/macos/toolchain/bin"
+        require(llvm_bin / "llvm-ar")
+        require(llvm_bin / "ld.lld")
+        configure = [sys.executable, "configure.py", "--macos", "--macos-renderer", RENDERER,
+                     "--android-guest-llvm-bin", llvm_bin, "--pgo", "off"]
+        if RENDERER != "metal":
+            require(GL / "GLES3/gl32.h")
+            configure += ["--android-guest-gl-include", GL]
+        run(*configure)
+        ninja = shutil.which("ninja") or str(ROOT / "build/macos/toolchain/venv/bin/ninja")
+        run(ninja, "-j", args.jobs, "macos_guest")
+    build_host(update_build)
+    package(None if args.no_data_path or args.release else args.data_root,
+            sign_identity=args.sign_identity, release=args.release, version=args.version, build=args.build_number,
+            content_tools=args.content_tools, update_build=update_build, update_channel=update_channel)
+    if args.install:
+        install_app(BUILD / (APP_NAME + ".app"), args.install)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"macOS build failed: {error}", file=sys.stderr)
+        sys.exit(1)

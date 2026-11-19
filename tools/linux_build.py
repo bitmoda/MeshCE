@@ -612,6 +612,8 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
         # once crashed it; the other builds use it on one thread)
         mbedtls_include = f"-I{MBEDTLS_DIR / 'include'} -DMBEDTLS_THREADING_C -DMBEDTLS_THREADING_PTHREAD"
         for source in sorted(platform_dir.glob("*.c")):
+            if source.name in ("d3d8_metal.c", "halo_frame_pacing.c") or source.name.startswith("metal_"):
+                continue
             if source.name in ("posix_update.c", "posix_dtls.c"):
                 add_object(source, f"{posix_cflags} {mbedtls_include}", posix=True)
             elif source.name == "posix_upnp.c":

@@ -269,6 +269,8 @@ def generate_web_build(n: Writer, sln: Any) -> None:
         abi, "-std=gnu11", "-D_GNU_SOURCE", "-D_FILE_OFFSET_BITS=64", "-w", f"-I{platform_dir}",
     ])
     for source in sorted(platform_dir.glob("*.c")):
+        if source.name in ("d3d8_metal.c", "halo_frame_pacing.c") or source.name.startswith("metal_"):
+            continue
         if source.name in WEB_EXCLUDE:
             continue
         add_object(source, posix_cflags if source.name.startswith("posix_") else platform_cflags)

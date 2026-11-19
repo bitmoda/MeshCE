@@ -738,6 +738,9 @@ int posix_register_url_scheme(const char *scheme, const char *description)
 
 /* ---------- Discord's local socket */
 
+/* macOS supplies its native Unix socket implementation in host_discord.c.
+The guest sockaddr layout is not what this connect uses. */
+#if !defined(HALO_MACOS) || defined(HALO_IOS)
 int posix_discord_connect(void)
 {
 #ifdef __ANDROID__
@@ -807,6 +810,7 @@ int posix_discord_connect(void)
 	return -1;
 #endif
 }
+#endif
 
 int posix_discord_write(int handle, const void *buffer, int length)
 {

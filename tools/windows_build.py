@@ -460,6 +460,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         replaced = set(config.get("replaced_platform_sources", []))
         mbedtls_include = f"-I{MBEDTLS_DIR / 'include'}"
         for source in sorted(linux_platform.glob("*.c")):
+            if source.name in ("d3d8_metal.c", "halo_frame_pacing.c") or source.name.startswith("metal_"):
+                continue
             if source.name in replaced:
                 continue
             if source.name in ("posix_mcc_preview.c", "posix_mcc_share.c"):
