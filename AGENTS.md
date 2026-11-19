@@ -45,3 +45,7 @@ Publishing a main release updates the three download buttons in `README.md` on `
 ## Notes
 
 Release notes name the tag, the network protocol, and what changed. A Mac release writes them once, for Mac, Windows, and Linux together, including how each one is installed. Windows and Linux leave that text alone when they add their files. They do not use em or en dashes, and they do not put a hyphen where a dash would have been. They do not credit Cursor.
+
+## OpenCE releases
+
+OpenCE releases live on this same repository. Their tags are `opence-testing-N` and `opence-build-N`. Their files are `opence-macos-arm64.dmg`, `opence-windows-release.zip`, and `opence-linux-release.zip`. This client's updater reads only `build-N` and `testing-N`, and only its own file names, so those tags do not move it. An OpenCE release is not marked Latest. The README buttons stay on the MeshCE `build-N` tag. The OpenCE checkout's AGENTS.md is the publish procedure. Publishing one is not part of a MeshCE release.

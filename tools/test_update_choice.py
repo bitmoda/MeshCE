@@ -45,6 +45,15 @@ int main(void)
 		"},{"
 		"\"tag_name\":\"build-3\",\"draft\":true,\"prerelease\":false,"
 		"\"assets\":[{\"name\":\"halo-windows-release.zip\"}]"
+		"},{"
+		"\"tag_name\":\"opence-build-90\",\"draft\":false,\"prerelease\":false,"
+		"\"assets\":[{\"name\":\"halo-windows-release.zip\"},{\"name\":\"opence-windows-release.zip\"}]"
+		"},{"
+		"\"tag_name\":\"opence-testing-91\",\"draft\":false,\"prerelease\":true,"
+		"\"assets\":[{\"name\":\"halo-windows-release.zip\"}]"
+		"},{"
+		"\"tag_name\":\"build-90extra\",\"draft\":false,\"prerelease\":false,"
+		"\"assets\":[{\"name\":\"halo-windows-release.zip\"}]"
 		"}]";
 	const char *latest =
 		"{\"tag_name\":\"build-30\",\"draft\":false,\"prerelease\":false,"
@@ -70,6 +79,10 @@ int main(void)
 		&choice, 28, "build-28");
 	failed += !expect("missing asset", update_choice_select(list, NULL, "halo-android-release.zip", 0, 0, 1, &choice),
 		&choice, 0, NULL);
+	failed += !expect("ignores opence main", update_choice_select(list, NULL, "halo-windows-release.zip", 0, 0, 1, &choice),
+		&choice, 28, "build-28");
+	failed += !expect("ignores opence testing", update_choice_select(list, NULL, "halo-windows-release.zip", 1, 0, 1, &choice),
+		&choice, 4, "testing-4");
 	return failed ? 1 : 0;
 }
 """
