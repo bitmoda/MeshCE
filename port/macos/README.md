@@ -11,9 +11,9 @@ security-setting change is required for this local build.
 
 ## Download
 
-The current Mac release is build 52, `MeshCE-macos-arm64.dmg`, on this
-repository's [releases page](https://github.com/bitmoda/MeshCE/releases/tag/build-52).
-Windows build 30 and Linux build 58 are the current releases for those systems.
+The current release is build 76. Mac is `MeshCE-macos-arm64.dmg`, Windows is
+`halo-windows-release.zip`, and Linux is `halo-linux-release.zip`, on this
+repository's [releases page](https://github.com/bitmoda/MeshCE/releases/tag/build-76).
 A testing release, when one is published, is a `testing-N` prerelease on that
 same page and uses the same disk image name.
 
@@ -35,7 +35,7 @@ SDK, or build tools are needed to run the downloaded app.
 On first launch, select your own original Xbox Halo disc image or extracted
 game folder. The download contains no maps or disc images.
 
-Players in one game need network protocol 35. A client does not join a host of
+Players in one game need network protocol 42. A client does not join a host of
 another protocol.
 
 ## Launch
@@ -158,7 +158,7 @@ MeshCE icon, and an invite in Discord. A person who asks to join is let in.
 Enable activity sharing in Discord to make it visible. The installed app handles
 both `halo://` links and the Discord application's launch scheme, so an invite
 can start MeshCE when it is closed. Ordinary campaign/client gameplay does not publish activity.
-This tree uses network protocol 35. Players need matching builds. Command-W is
+This tree uses network protocol 42. Players need matching builds. Command-W is
 ignored while playing, and Command-Q or the window's close button quits.
 
 ## Build

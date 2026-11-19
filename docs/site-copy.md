@@ -22,7 +22,28 @@ On your computer
 
 Windows and Linux draw with OpenGL. Mac draws with Metal. Sound, input, and gamepads go through SDL3.
 
-On Mac, the app can update itself. On Windows and Linux, a newer download replaces the program and leaves your maps, saves, and settings in place.
+On Mac, build 76 checks for a newer release and asks before installing it. On Windows and Linux, a newer download replaces the program and leaves maps, saves, and settings in place.
+
+Downloads
+
+Mac, build 76: https://github.com/bitmoda/MeshCE/releases/download/build-76/MeshCE-macos-arm64.dmg
+Open the disk image and drag MeshCE into Applications. Apple Silicon, macOS 26 or later.
+
+Windows, build 76: https://github.com/bitmoda/MeshCE/releases/download/build-76/halo-windows-release.zip
+Unzip it and run halo.exe.
+
+Linux, build 76: https://github.com/bitmoda/MeshCE/releases/download/build-76/halo-linux-release.zip
+Unzip it and run halo.
+
+The site is https://bit.moda/meshce. Discord is https://discord.gg/jbHsRSGtd3.
+
+OpenCE for Mac
+
+OpenCE on Apple Silicon is a separate release. It keeps the OpenCE menus and gameplay. Its network protocol is 44. MeshCE does not install it, and it does not install MeshCE.
+
+https://github.com/bitmoda/MeshCE/releases/download/opence-build-1/opence-macos-arm64.dmg
+
+Open the disk image and drag OpenCE into Applications. Apple Silicon, macOS 26 or later. Saves go in ~/Library/Application Support/OpenCE.
 
 MeshCE is an unofficial fan project. It is not endorsed by or affiliated with Microsoft, Xbox Game Studios, Halo Studios, Activision, or Bungie. Halo and Halo: Combat Evolved are trademarks of Microsoft Corporation. Halo is copyright Microsoft Corporation. Bring your own copy of the game.
 
