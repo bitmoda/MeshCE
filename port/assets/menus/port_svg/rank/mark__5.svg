@@ -1,14 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <g fill="#ffffff" stroke="#12161c" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M31,34
-      C24,32 14,26 8,16
-      C14,18 18,22 20,28
-      C22,24 26,20 30,18
-      C28,24 29,30 31,34 Z"/>
-    <path d="M33,34
-      C40,32 50,26 56,16
-      C50,18 46,22 44,28
-      C42,24 38,20 34,18
-      C36,24 35,30 33,34 Z"/>
+  <g fill="#ffffff" stroke="#14181E" stroke-width="1.7" stroke-linejoin="round">
+    <ellipse cx="24" cy="22" rx="16" ry="5.6" transform="rotate(-52 24 22)"/>
+    <ellipse cx="20" cy="33" rx="18" ry="5.4" transform="rotate(-8 20 33)"/>
+    <ellipse cx="25" cy="44" rx="15" ry="5.1" transform="rotate(40 25 44)"/>
+    <ellipse cx="40" cy="22" rx="16" ry="5.6" transform="rotate(52 40 22)"/>
+    <ellipse cx="44" cy="33" rx="18" ry="5.4" transform="rotate(8 44 33)"/>
+    <ellipse cx="39" cy="44" rx="15" ry="5.1" transform="rotate(-40 39 44)"/>
+    <circle cx="32" cy="33" r="6.2"/>
   </g>
 </svg>

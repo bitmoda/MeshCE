@@ -1,7 +1,8 @@
 # MeshCE: Halo: Combat Evolved for Mac, Windows, and Linux
 
 <p align="center">
-  <a href="https://discord.gg/NRFA2NAqx2"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://bit.moda/meshce"><img src="https://img.shields.io/badge/Site-bit.moda%2Fmeshce-1f6feb?style=for-the-badge" alt="MeshCE site"></a>
+  <a href="https://discord.gg/jbHsRSGtd3"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 <p align="center">
   <img src="port/assets/icon/meshce-icon.png" alt="MeshCE" width="384">
