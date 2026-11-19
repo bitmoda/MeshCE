@@ -30,7 +30,7 @@ end.
 | `pgo/` | Profile-guided optimisation profiles |
 | `deploy/` | Running a dedicated server: systemd, Docker, Pterodactyl, Helm, PufferPanel, MCSManager, example gametypes |
 | `assets/` | Game data for local runs (gitignored: `maps/`, `custom_maps/`) |
-| `.github/workflows/` | CI: builds every platform on each push, publishes releases from `main` |
+| `.github/workflows/` | CI: builds every platform on each push. Releases are published by hand |
 
 ## Building
 
@@ -377,3 +377,17 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [tools/stagekit/README.md](tools/stagekit/README.md) | Scenarios staged and instrumented on the real engine, no retail assets |
 | `port/third_party/*/README.md` | Each vendored library |
 | [AUTHORS.md](AUTHORS.md) | Art credits |
+
+## Releases
+
+Mac, Windows, and Linux share one OpenCE number. The tags are `opence-testing-N` and `opence-build-N` on `bitmoda/MeshCE`. The files are `opence-macos-arm64.dmg`, `opence-windows-release.zip`, and `opence-linux-release.zip`. The version is `0.3.N`, and N is the number on the tag. The first testing tag, when one is published, is `opence-testing-1`. A local build with update build 0 is not a release.
+
+A machine looks up the highest `opence-testing` tag. When that tag lacks this machine's file, the file is added and the build is stamped with that N. The next tag is opened only when all three files are present, and it is one higher. When no OpenCE testing tag exists, Mac opens `opence-testing-1`. Windows and Linux wait for Mac to open a tag.
+
+Mac writes the title and the notes when it opens the tag. A testing title is `0.3.N Mac, Windows, Linux opence-testing-N`. A main title is `0.3.N Mac, Windows, Linux opence-build-N`. The notes name the tag, network protocol 44, what changed, and how each platform is installed. Windows and Linux leave the title and the notes as Mac wrote them.
+
+A main release is the testing release you ship. Its tag is `opence-build-N` with that same N. It is a normal release, and it is not marked Latest. A testing release is a prerelease, and it is not marked Latest. The Latest badge stays on the MeshCE line.
+
+Do not attach `halo-windows-release.zip`, `halo-linux-release.zip`, or `MeshCE-macos-arm64.dmg`. Do not use a `build-` or `testing-` tag. Do not change the README download buttons. Do not credit Cursor. Do not use em or en dashes, and do not put a hyphen where a dash would have been.
+
+Windows and Linux release builds set `HALO_BUILD_NUMBER` to that tag's number and `HALO_BUILD_CHANNEL` to `main` or `testing`. A Mac release passes that number to `--build-number` and `--update-build`, and passes `main` or `testing` to `--update-channel`. `tools/opence_release.py` plans the next file. It does not upload.

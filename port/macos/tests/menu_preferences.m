@@ -238,74 +238,71 @@ int main(int argc, const char **argv) {
             assert(!HaloUpdateConfigurationIsValid(@{@"SUFeedURL":url, @"SUPublicEDKey":key}));
         assert(!HaloUpdateConfigurationIsValid(@{}));
         assert(!HaloUpdateConfigurationIsValid(@{@"SUFeedURL":@"https://example.com/feed.xml", @"SUPublicEDKey":@"invalid"}));
-        assert(HaloForkUpdateBuildFromTag(@"test-v0.3.0-net28-mac16") == 16);
-        assert([HaloForkUpdateAssetName(@"test-v0.3.0-net28-mac16")
-            isEqual:@"OpenCE-macos-arm64-net28-mac16.dmg"]);
-        assert(HaloForkUpdateBuildFromTag(@"build-70") == 70);
-        assert([HaloForkUpdateAssetName(@"build-70") isEqual:@"OpenCE-macos-arm64.dmg"]);
-        assert(HaloForkUpdateBuildFromTag(@"build-70-extra") == 0);
-        assert(HaloForkUpdateAssetName(@"test-v0.3.0-net28-mac16-extra") == nil);
-        NSString *mac16 = @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/test-v0.3.0-net28-mac16/OpenCE-macos-arm64-net28-mac16.dmg";
-        NSString *build70 = @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/build-70/OpenCE-macos-arm64.dmg";
-        assert(HaloForkUpdateDownloadIsTrusted(@"test-v0.3.0-net28-mac16", mac16));
-        assert(HaloForkUpdateDownloadIsTrusted(@"build-70", build70));
-        assert(!HaloForkUpdateDownloadIsTrusted(@"build-70", mac16));
-        assert(!HaloForkUpdateDownloadIsTrusted(@"test-v0.3.0-net28-mac16",
-            @"https://example.com/OpenCE-macos-arm64-net28-mac16.dmg"));
-        assert(!HaloForkUpdateDownloadIsTrusted(@"test-v0.3.0-net28-mac17", mac16));
-        assert(HaloForkUpdateBuildFromTag(@"test-v0.3.0-net28-ios3") == 0);
-        assert(HaloForkUpdateAssetName(@"test-v0.3.0-net28-ios3") == nil);
-        NSString *mac17 = @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/test-v0.3.0-net28-mac17/OpenCE-macos-arm64-net28-mac17.dmg";
+        assert(HaloForkUpdateBuildFromTag(@"test-v0.3.0-net28-mac16") == 0);
+        assert(HaloForkUpdateAssetName(@"test-v0.3.0-net28-mac16") == nil);
+        assert(HaloForkUpdateBuildFromTag(@"build-70") == 0);
+        assert(HaloForkUpdateAssetName(@"build-70") == nil);
+        assert(HaloForkUpdateBuildFromTag(@"opence-build-70") == 70);
+        assert([HaloForkUpdateAssetName(@"opence-build-70") isEqual:@"opence-macos-arm64.dmg"]);
+        assert(HaloForkUpdateBuildFromTag(@"opence-build-70-extra") == 0);
+        assert(HaloForkUpdateAssetName(@"opence-build-70-extra") == nil);
+        NSString *mesh = @"https://github.com/bitmoda/MeshCE/releases/download/build-75/MeshCE-macos-arm64.dmg";
+        NSString *upstream = @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/opence-build-70/opence-macos-arm64.dmg";
+        NSString *build70 = @"https://github.com/bitmoda/MeshCE/releases/download/opence-build-70/opence-macos-arm64.dmg";
+        assert(HaloForkUpdateDownloadIsTrusted(@"opence-build-70", build70));
+        assert(!HaloForkUpdateDownloadIsTrusted(@"opence-build-70", upstream));
+        assert(!HaloForkUpdateDownloadIsTrusted(@"build-75", mesh));
+        assert(!HaloForkUpdateDownloadIsTrusted(@"opence-build-70",
+            @"https://example.com/opence-macos-arm64.dmg"));
+        assert(HaloForkUpdateBuildFromTag(@"testing-4") == 0);
+        assert(HaloForkUpdateChannelFromTag(@"build-70") == nil);
         NSArray *releases = @[
-            @{@"tag_name": @"test-v0.3.0-net28-ios9", @"draft": @NO, @"prerelease": @NO,
-              @"assets": @[@{@"name": @"OpenCE-ios.ipa", @"browser_download_url": @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/test-v0.3.0-net28-ios9/OpenCE-ios.ipa"}]},
-            @{@"tag_name": @"test-v0.3.0-net28-mac17", @"draft": @NO, @"prerelease": @YES,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64-net28-mac17.dmg", @"browser_download_url": mac17}]},
-            @{@"tag_name": @"test-v0.3.0-net28-mac16", @"draft": @NO, @"prerelease": @NO,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64-net28-mac16.dmg", @"browser_download_url": mac16}]},
-            @{@"tag_name": @"build-3", @"draft": @NO, @"prerelease": @NO,
-              @"assets": @[@{@"name": @"halo-windows-release.zip", @"browser_download_url": @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/build-3/halo-windows-release.zip"}]},
-            @{@"tag_name": @"build-70", @"draft": @NO, @"prerelease": @NO,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64.dmg", @"browser_download_url": build70}]},
+            @{@"tag_name": @"build-75", @"draft": @NO, @"prerelease": @NO,
+              @"assets": @[@{@"name": @"MeshCE-macos-arm64.dmg", @"browser_download_url": mesh},
+                           @{@"name": @"halo-windows-release.zip", @"browser_download_url":
+                               @"https://github.com/bitmoda/MeshCE/releases/download/build-75/halo-windows-release.zip"}]},
+            @{@"tag_name": @"opence-build-70", @"draft": @NO, @"prerelease": @NO,
+              @"assets": @[@{@"name": @"opence-macos-arm64.dmg", @"browser_download_url": build70}]},
         ];
         NSString *chosenTag = nil;
         NSString *chosenURL = nil;
         assert(HaloForkNewestMacRelease(releases, &chosenTag, &chosenURL) == 70);
-        assert([chosenTag isEqual:@"build-70"]);
+        assert([chosenTag isEqual:@"opence-build-70"]);
         assert([chosenURL isEqual:build70]);
-        assert(HaloForkNewestMacRelease(@[@{@"tag_name": @"test-v0.3.0-net28-ios9"}], nil, nil) == 0);
-        NSString *testing4 = @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/testing-4/OpenCE-macos-arm64.dmg";
-        NSString *testing2 = @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/testing-2/OpenCE-macos-arm64.dmg";
-        assert(HaloForkUpdateBuildFromTag(@"testing-4") == 4);
-        assert([HaloForkUpdateChannelFromTag(@"testing-4") isEqual:@"testing"]);
-        assert([HaloForkUpdateChannelFromTag(@"build-70") isEqual:@"main"]);
-        assert(HaloForkUpdateChannelFromTag(@"testing-4-extra") == nil);
-        assert([HaloForkUpdateAssetName(@"testing-4") isEqual:@"OpenCE-macos-arm64.dmg"]);
-        assert(HaloForkUpdateDownloadIsTrusted(@"testing-4", testing4));
-        assert(!HaloForkUpdateDownloadIsTrusted(@"testing-4", build70));
+        assert(HaloForkNewestMacRelease(@[@{@"tag_name": @"build-75", @"draft": @NO, @"prerelease": @NO,
+            @"assets": @[@{@"name": @"MeshCE-macos-arm64.dmg", @"browser_download_url": mesh}]}], nil, nil) == 0);
+        NSString *testing4 = @"https://github.com/bitmoda/MeshCE/releases/download/opence-testing-4/opence-macos-arm64.dmg";
+        NSString *testing2 = @"https://github.com/bitmoda/MeshCE/releases/download/opence-testing-2/opence-macos-arm64.dmg";
+        assert(HaloForkUpdateBuildFromTag(@"opence-testing-4") == 4);
+        assert([HaloForkUpdateChannelFromTag(@"opence-testing-4") isEqual:@"testing"]);
+        assert([HaloForkUpdateChannelFromTag(@"opence-build-70") isEqual:@"main"]);
+        assert(HaloForkUpdateChannelFromTag(@"opence-testing-4-extra") == nil);
+        assert([HaloForkUpdateAssetName(@"opence-testing-4") isEqual:@"opence-macos-arm64.dmg"]);
+        assert(HaloForkUpdateDownloadIsTrusted(@"opence-testing-4", testing4));
+        assert(!HaloForkUpdateDownloadIsTrusted(@"opence-testing-4", build70));
         NSArray *mixed = [releases arrayByAddingObjectsFromArray:@[
-            @{@"tag_name": @"testing-4", @"draft": @NO, @"prerelease": @YES,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64.dmg", @"browser_download_url": testing4}]},
-            @{@"tag_name": @"testing-2", @"draft": @NO, @"prerelease": @YES,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64.dmg", @"browser_download_url": testing2}]},
-            @{@"tag_name": @"testing-9", @"draft": @NO, @"prerelease": @NO,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64.dmg", @"browser_download_url":
-                  @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/testing-9/OpenCE-macos-arm64.dmg"}]},
+            @{@"tag_name": @"opence-testing-4", @"draft": @NO, @"prerelease": @YES,
+              @"assets": @[@{@"name": @"opence-macos-arm64.dmg", @"browser_download_url": testing4}]},
+            @{@"tag_name": @"opence-testing-2", @"draft": @NO, @"prerelease": @YES,
+              @"assets": @[@{@"name": @"opence-macos-arm64.dmg", @"browser_download_url": testing2}]},
+            @{@"tag_name": @"opence-testing-9", @"draft": @NO, @"prerelease": @NO,
+              @"assets": @[@{@"name": @"opence-macos-arm64.dmg", @"browser_download_url":
+                  @"https://github.com/bitmoda/MeshCE/releases/download/opence-testing-9/opence-macos-arm64.dmg"}]},
         ]];
         assert(HaloForkNewestMacRelease(mixed, &chosenTag, &chosenURL) == 70);
         assert(HaloForkUpdateChoice(mixed, NO, @"main", 50, &chosenTag, &chosenURL) == 70);
         assert(HaloForkUpdateChoice(mixed, NO, @"main", 70, &chosenTag, &chosenURL) == 0);
         assert(HaloForkUpdateChoice(mixed, NO, @"testing", 80, &chosenTag, &chosenURL) == 70);
-        assert([chosenTag isEqual:@"build-70"]);
+        assert([chosenTag isEqual:@"opence-build-70"]);
         assert(HaloForkUpdateChoice(mixed, YES, @"main", 70, &chosenTag, &chosenURL) == 4);
-        assert([chosenTag isEqual:@"testing-4"]);
+        assert([chosenTag isEqual:@"opence-testing-4"]);
         assert([chosenURL isEqual:testing4]);
         assert(HaloForkUpdateChoice(mixed, YES, @"testing", 4, &chosenTag, &chosenURL) == 0);
         assert(HaloForkUpdateChoice(mixed, YES, @"testing", 2, &chosenTag, &chosenURL) == 4);
         assert(HaloForkNewestMacRelease(@[
-            @{@"tag_name": @"testing-9", @"draft": @NO, @"prerelease": @NO,
-              @"assets": @[@{@"name": @"OpenCE-macos-arm64.dmg", @"browser_download_url":
-                  @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/testing-9/OpenCE-macos-arm64.dmg"}]}],
+            @{@"tag_name": @"opence-testing-9", @"draft": @NO, @"prerelease": @NO,
+              @"assets": @[@{@"name": @"opence-macos-arm64.dmg", @"browser_download_url":
+                  @"https://github.com/bitmoda/MeshCE/releases/download/opence-testing-9/opence-macos-arm64.dmg"}]}],
             nil, nil) == 0);
         NSURL *dataRoot = [test URLByAppendingPathComponent:@"game-data" isDirectory:YES];
         NSURL *history = HaloForkUpdateHistoryURL(dataRoot);

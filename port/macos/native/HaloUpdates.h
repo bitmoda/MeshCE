@@ -4,12 +4,11 @@
 int halo_fork_update_notice(char *out, size_t capacity);
 void halo_fork_update_set_notice(const char *text);
 
-/* The Mac release number in a fork tag. build-40 is 40. testing-4 is 4. An
-   older tag such as test-v0.3.0-net28-mac16 is 16. Zero when the tag is not
-   one of those releases. An iOS tag is zero. A Windows or Linux build-N tag
-   has no Mac disk image, so the release list skips it. */
+/* The Mac release number in an OpenCE tag. opence-build-40 is 40.
+   opence-testing-4 is 4. Zero for a MeshCE build-N or testing-N tag, and for
+   any other tag. A release without opence-macos-arm64.dmg is skipped. */
 long HaloForkUpdateBuildFromTag(NSString *tag);
-/* "main" for build-N and the older mac tags. "testing" for testing-N.
+/* "main" for opence-build-N. "testing" for opence-testing-N.
    Nil for any other tag. */
 NSString *HaloForkUpdateChannelFromTag(NSString *tag);
 NSString *HaloForkUpdateAssetName(NSString *tag);
@@ -19,10 +18,10 @@ BOOL HaloForkUpdateDownloadIsTrusted(NSString *tag, NSString *url);
    can be the newest tag; it is not this app. Drafts and prereleases are
    skipped. Returns 0 when the list has no Mac disk image. */
 long HaloForkNewestMacRelease(NSArray *releases, NSString **tag, NSString **url);
-/* The release this app should install. testing selects the newest testing-N
-   prerelease. Otherwise the newest main release. A testing app with testing
-   off is sent back to that main release even when its number is lower.
-   Returns 0 when the app should stay. */
+/* The release this app should install. testing selects the newest
+   opence-testing-N prerelease. Otherwise the newest opence-build-N release.
+   A testing app with testing off is sent back to that main release even when
+   its number is lower. Returns 0 when the app should stay. */
 long HaloForkUpdateChoice(NSArray *releases, BOOL testing, NSString *currentChannel, long currentBuild,
     NSString **tag, NSString **url);
 /* update.txt beside debug.txt. Nil when this launch has no game data folder. */

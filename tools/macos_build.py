@@ -68,8 +68,8 @@ def build_plugin():
 
 
 def resolve_update_build(explicit):
-    """This app's Mac release number. A newer tag on OpenCommunityEdition/OpenCE is offered.
-    Zero does not look. The guest updater does not run in this build."""
+    """This app's Mac release number. A newer opence-build or opence-testing tag
+    on bitmoda/MeshCE is offered. Zero does not look."""
     if explicit is None:
         raw = os.environ.get("HALO_MAC_UPDATE_BUILD", "0")
         if not re.fullmatch(r"\d+", raw):
@@ -81,8 +81,8 @@ def resolve_update_build(explicit):
 
 
 def resolve_update_channel(explicit):
-    """main follows build-N. testing follows testing-N prereleases. The
-    installed app records this so turning testing off can return to main."""
+    """main follows opence-build-N. testing follows opence-testing-N prereleases.
+    The installed app records this so turning testing off can return to main."""
     if explicit is None:
         explicit = os.environ.get("HALO_MAC_UPDATE_CHANNEL", "main")
     if explicit not in ("main", "testing"):
@@ -578,9 +578,9 @@ def main():
     parser.add_argument("--version", default=APP_VERSION)
     parser.add_argument("--build-number", default=APP_BUILD)
     parser.add_argument("--update-build", type=int, default=None,
-                        help="Offer a newer Mac release from OpenCommunityEdition/OpenCE. 0 does not look.")
+                        help="Offer a newer opence-build or opence-testing release from bitmoda/MeshCE. 0 does not look.")
     parser.add_argument("--update-channel", choices=("main", "testing"), default=None,
-                        help="main follows build-N. testing follows testing-N prereleases.")
+                        help="main follows opence-build-N. testing follows opence-testing-N prereleases.")
     parser.add_argument("--content-tools", type=Path, metavar="TOOLCHAIN_DIRECTORY",
                         help="Opt in to reviewed Invader helpers for local community package import")
     parser.add_argument("--install", nargs="?", const=Path("/Applications"), type=Path,

@@ -879,6 +879,11 @@ static const struct config_setting config_settings[] =
 	{ "update.auto", _config_boolean, "true", "HALO_UPDATE_AUTO", _environment_value, _platform_all,
 		"Look for a new version when the game starts, and offer to update to it;\n"
 		"false never looks (the game's \"Do not ask again\" writes false here)." },
+	{ "update.testing", _config_boolean, "false", "HALO_UPDATE_TESTING", _environment_value, _platform_all,
+		"Updates follow opence-testing releases while this is true. False follows\n"
+		"the latest opence-build release, and offers it again after a testing\n"
+		"release was installed. A build- or testing- release is MeshCE and is\n"
+		"not installed." },
 	/* (a dedicated server's: halo --server, port/linux/src/server_mode.c;
 	written into the file only by one) */
 	{ "server.enabled", _config_boolean, "false", "HALO_SERVER", _environment_set_is_true, _platform_server,

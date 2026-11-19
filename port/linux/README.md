@@ -696,6 +696,7 @@ the setting for one start of the game. It has priority over the file.
 | `server.master_publish_address` | `false` | `HALO_SERVER_MASTER_PUBLISH_ADDRESS` | `true`: the master servers can give this server's address to players. `false`: only their probe uses it. |
 | `discord.application_id` | the application of the project | `HALO_DISCORD_APPLICATION` | The Discord application for invites. Empty: no Discord. |
 | `update.auto` | `true` | `HALO_UPDATE_AUTO` | `true`: at start-up, the game looks for a new version. Refer to "Updates". `false`: the game does not look. |
+| `update.testing` | `false` | `HALO_UPDATE_TESTING` | `true`: follow `opence-testing` releases. `false`: follow the latest `opence-build` release, and offer it again after a testing release was installed. |
 | `streamer.enabled` | `false` | `HALO_STREAMER_MODE` | `true`: streamer mode hides offensive words, as stars, in the names and text of other players, maps and mods, at the levels below. Refer to "Streamer mode". STREAMER MODE in Settings > Network Setup > Streamer Mode. |
 | `streamer.slurs` | `"mild"` | `HALO_STREAMER_SLURS` | With `streamer.enabled`, the slurs (race, ethnicity, sexuality, gender, disability) hidden: `"off"`, `"severe"`, `"strong"` (strong and severe) or `"mild"` (all). CENSOR SLURS in Settings > Network Setup > Streamer Mode. |
 | `streamer.swearing` | `"strong"` | `HALO_STREAMER_SWEARING` | With `streamer.enabled`, the swearing and sexual words hidden: `"off"`, `"severe"`, `"strong"` or `"mild"`. CENSOR SWEARING in Settings > Network Setup > Streamer Mode. |
@@ -760,12 +761,16 @@ see [the network agreement](NETCODE.md#opence-network-agreement).
 
 ## Updates
 
-The builds from GitHub Actions (refer to the main [README](../../README.md#download))
-can update themselves. At start-up, the game asks GitHub for the latest
-release. The game does not wait for the answer. If the latest release is not
-newer, the game does nothing.
+A numbered release build looks at [bitmoda/MeshCE](https://github.com/bitmoda/MeshCE)
+for this line. Main follows tags `opence-build-N`. With `update.testing` true,
+the game follows `opence-testing-N`, and that release must be a prerelease.
+The file is `opence-linux-release.zip` or `opence-windows-release.zip`. A
+`build-N` or `testing-N` release, and a file named `halo-linux-release.zip`
+or `halo-windows-release.zip`, belongs to MeshCE and is not installed. The
+game does not wait for the answer. If no newer OpenCE release is there, the
+game does nothing.
 
-If the latest release is newer, the game asks: "Do you want to update?"
+If a newer OpenCE release is there, the game asks: "Do you want to update?"
 
 - Select "Yes" to update. The game downloads the release for this platform,
   replaces its files and starts the new version. The old files get the
@@ -787,7 +792,8 @@ certificate store of Windows (WinHTTP). The folder of the executable must
 let the game write to it.
 
 Builds that you make yourself have no build number. They do not look for
-updates.
+updates. An OpenCE release is not marked Latest. The Latest badge on that
+repository stays with the MeshCE line.
 
 ## Frame rate
 

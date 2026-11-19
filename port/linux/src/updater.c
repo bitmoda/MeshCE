@@ -4,17 +4,18 @@ UPDATER.C
 The desktop ports' self-updater (Linux and Windows; the Android app updates
 itself in Java, port/android).
 
-A build of the main branch made by GitHub Actions knows its build number
-(HALO_BUILD_NUMBER, the workflow's run number, which names its release:
-build-<number>); other builds have none and never look for updates. When
-update.auto in config.toml is true (the default), the game asks GitHub for
-the latest release when it starts, on a thread of its own: the game starts
-meanwhile, and nothing happens if the release is not newer or cannot be
-reached. If it is newer, the game asks whether to update:
+A numbered release build looks at bitmoda/MeshCE. It accepts opence-build-N
+when it is on main, and opence-testing-N when update.testing is true. The
+tag is that prefix plus a whole number and nothing more. The file is
+opence-windows-release.zip or opence-linux-release.zip. A build-N or
+testing-N release is the MeshCE line and is left alone. A build without a
+number never looks. When update.auto in config.toml is true (the default),
+the game asks GitHub when it starts, on a thread of its own: the game starts
+meanwhile, and nothing happens if no newer OpenCE release can be reached.
+If one is newer, the game asks whether to update:
 
-- Yes: the release's build for this platform and configuration
-  (halo-<platform>-<release|debug>.zip) is downloaded next to the executable
-  (into update.partial/) and unpacked, its files put in place of the running
+- Yes: this platform's zip is downloaded next to the executable (into
+  update.partial/) and unpacked, its files put in place of the running
   game's (which become <name>.old, deleted at the next start), and the new
   game started; this one quits.
 - No: nothing, until the next start.
@@ -27,6 +28,7 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 
 #include "platform.h"
 #include "port_config.h"
+#include "opence_update_choice.h"
 #include "update.h"
 
 #if !defined(HALO_ANDROID) && !defined(HALO_WEB)
@@ -45,8 +47,11 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 #ifndef HALO_BUILD_FLAVOR
 #define HALO_BUILD_FLAVOR "release"
 #endif
+#ifndef HALO_BUILD_CHANNEL
+#define HALO_BUILD_CHANNEL "main"
+#endif
 
-#define UPDATE_REPOSITORY "OpenCommunityEdition/OpenCE"
+#define UPDATE_REPOSITORY "bitmoda/MeshCE"
 #ifdef _WIN32
 #define UPDATE_PLATFORM "windows"
 #define PATH_SEPARATOR "\\"
@@ -54,7 +59,7 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 #define UPDATE_PLATFORM "linux"
 #define PATH_SEPARATOR "/"
 #endif
-#define UPDATE_ASSET "halo-" UPDATE_PLATFORM "-" HALO_BUILD_FLAVOR ".zip"
+#define UPDATE_ASSET "opence-" UPDATE_PLATFORM "-" HALO_BUILD_FLAVOR ".zip"
 #define UPDATE_DIRECTORY "update.partial"
 #define MAXIMUM_UPDATE_FILES 32
 /* the most a download may be: GitHub's answer about the latest release, a
@@ -72,6 +77,7 @@ enum
 
 static SDL_AtomicInt updater_state;
 static long updater_latest_build;
+static char updater_latest_tag[64];
 /* the network version its release's notes give ("Network version: <n>",
 which CI writes since it plays one other than the build before it can), 0
 when they give none */
@@ -348,61 +354,106 @@ done:
 
 /* ---------- checking */
 
-/* the build number of GitHub's latest release, 0 if there is none */
-static long updater_latest_release(void)
+static int updater_on_testing(void)
+{
+	return strcmp(HALO_BUILD_CHANNEL, "testing") == 0;
+}
+
+/* the notes of the chosen tag, "Network version: <n>", else 0 */
+static long updater_network_version(const char *json, const char *tag)
+{
+	char needle[80];
+	const char *found;
+	const char *network;
+	const char *next;
+
+	snprintf(needle, sizeof(needle), "\"%s\"", tag);
+	found = strstr(json, needle);
+	if (!found)
+		return 0;
+	next = strstr(found + 1, "\"tag_name\"");
+	network = strstr(found, "Network version: ");
+	if (!network || (next && network > next))
+		return 0;
+	return strtol(network + 17, NULL, 10);
+}
+
+/* the file at url, or null. A missing latest release is not an error. */
+static char *updater_fetch(const char *url, const char *file_name, int required)
 {
 	char path[1200];
 	char error[512] = "";
 	size_t size = 0;
 	char *text;
-	const char *tag;
-	long build = 0;
 
-	updater_path(path, sizeof(path), "update-check.json");
-	if (!update_download("https://api.github.com/repos/" UPDATE_REPOSITORY "/releases/latest", path,
-		MAXIMUM_CHECK_SIZE, NULL, NULL, error, sizeof(error)))
+	updater_path(path, sizeof(path), file_name);
+	if (!update_download(url, path, MAXIMUM_CHECK_SIZE, NULL, NULL, error, sizeof(error)))
 	{
-		platform_log("update: could not check for a new version: %s", error);
-		return 0;
+		if (required)
+			platform_log("update: could not check for a new version: %s", error);
+		update_delete_file(path);
+		return NULL;
 	}
 	text = SDL_LoadFile(path, &size);
 	update_delete_file(path);
-	if (!text)
-		return 0;
-	/* "tag_name": "build-<number>" */
-	tag = strstr(text, "\"tag_name\"");
-	if (tag)
-	{
-		tag = strchr(tag + 10, '"');
-		if (tag && !strncmp(tag, "\"build-", 7))
-			build = strtol(tag + 7, NULL, 10);
-	}
-	/* (and the network version its notes give, "Network version: <n>") */
-	{
-		const char *network = strstr(text, "Network version: ");
+	return text;
+}
 
-		updater_release_network_version = network ? strtol(network + 17, NULL, 10) : 0;
+/* 1 when an OpenCE release should be installed, 0 when this build stays, -1
+when nothing could be read. GitHub's Latest release is read too. A MeshCE
+tag on it is ignored, and an OpenCE tag on it is still visible. */
+static int updater_select_release(struct opence_update_choice *choice)
+{
+	char list_url[160];
+	char latest_url[160];
+	char *list_json;
+	char *latest_json;
+	int found;
+	int want_testing = config_boolean("update.testing");
+	long network;
+
+	snprintf(list_url, sizeof(list_url),
+		"https://api.github.com/repos/" UPDATE_REPOSITORY "/releases?per_page=100");
+	snprintf(latest_url, sizeof(latest_url),
+		"https://api.github.com/repos/" UPDATE_REPOSITORY "/releases/latest");
+	list_json = updater_fetch(list_url, "update-check.json", 1);
+	latest_json = updater_fetch(latest_url, "update-latest.json", 0);
+	if (!list_json && !latest_json)
+		return -1;
+	found = opence_update_choice_select(list_json, latest_json, UPDATE_ASSET, want_testing,
+		updater_on_testing(), HALO_BUILD_NUMBER, choice);
+	if (found > 0)
+	{
+		network = updater_network_version(list_json ? list_json : "", choice->tag);
+		if (!network)
+			network = updater_network_version(latest_json ? latest_json : "", choice->tag);
+		updater_release_network_version = network;
 	}
-	SDL_free(text);
-	return build;
+	SDL_free(list_json);
+	SDL_free(latest_json);
+	return found;
 }
 
 static int SDLCALL updater_check_thread(void *context)
 {
-	long latest = updater_latest_release();
+	struct opence_update_choice choice;
+	int found;
 
 	(void)context;
-	if (latest > HALO_BUILD_NUMBER)
+	memset(&choice, 0, sizeof(choice));
+	found = updater_select_release(&choice);
+	if (found > 0)
 	{
-		platform_log("update: build %ld is available (this is build %d)", latest, HALO_BUILD_NUMBER);
-		updater_latest_build = latest;
+		platform_log("update: %s is available (this is build %d)", choice.tag, HALO_BUILD_NUMBER);
+		updater_latest_build = choice.number;
 		updater_latest_network_version = updater_release_network_version;
+		snprintf(updater_latest_tag, sizeof(updater_latest_tag), "%s", choice.tag);
 		SDL_SetAtomicInt(&updater_state, _updater_available);
 	}
 	else
 	{
-		if (latest)
-			platform_log("update: this is the latest build (%d)", HALO_BUILD_NUMBER);
+		if (found == 0)
+			platform_log("update: no newer OpenCE release for this build (%d)", HALO_BUILD_NUMBER);
 		SDL_SetAtomicInt(&updater_state, _updater_handled);
 	}
 	return 0;
@@ -448,8 +499,8 @@ static int SDLCALL updater_download_thread(void *context)
 /* the release's zip's address */
 static void updater_zip_url(char *url, size_t size)
 {
-	snprintf(url, size, "https://github.com/" UPDATE_REPOSITORY "/releases/download/build-%ld/" UPDATE_ASSET,
-		updater_latest_build);
+	snprintf(url, size, "https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/" UPDATE_ASSET,
+		updater_latest_tag);
 }
 
 /* downloads the release's zip, showing how far it has got in a window of its
@@ -946,7 +997,7 @@ void updater_poll(SDL_Window *window)
 	if (fullscreen)
 		SDL_SetWindowFullscreen(window, false);
 	snprintf(message, sizeof(message),
-		"A new version of Halo was detected (build %ld; this is build %d).\n\n"
+		"A new version of OpenCE was detected (build %ld; this is build %d).\n\n"
 		"Do you want to update? The game will close and start the new version.",
 		updater_latest_build, HALO_BUILD_NUMBER);
 	{

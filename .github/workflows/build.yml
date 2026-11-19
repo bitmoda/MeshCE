@@ -371,16 +371,11 @@ jobs:
           retention-days: 3
 
   release:
-    # The eight builds (and the Windows builds' PDBs) as a release, tagged
-    # build-<run number> and marked latest
-    # (every file keeps its name from release to release, for the README's
-    # latest/download links), with their SHA256SUMS and, when the
-    # RELEASE_SIGNING_KEY secret is set, its Ed25519 signature by the release
-    # key (SHA256SUMS.sig; the public key is deploy/release-key.pub); then all
-    # but the newest five build-* releases go, tags and all. Only for main,
-    # and only when every platform built.
+    # OpenCE releases are published by hand as opence-build-N and
+    # opence-testing-N. This job must not create a build-N tag or mark a
+    # release Latest on bitmoda/MeshCE. The steps stay here and do not run.
     needs: [linux, android, windows, web]
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

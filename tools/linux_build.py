@@ -164,14 +164,18 @@ def build_repository() -> str:
 
 def updater_defines(release: bool) -> str:
     """the self-updater's build (port/linux/src/updater.c): its number, from
-    HALO_BUILD_NUMBER (tools/ci_build.py gives it for builds of main; none
-    elsewhere, which never look for updates), its configuration, and the
-    repository it is made from (build_repository)"""
+    HALO_BUILD_NUMBER (0 never looks), its channel, from HALO_BUILD_CHANNEL
+    (main or testing), its configuration, and the repository it is made from
+    (build_repository)"""
     number = os.environ.get("HALO_BUILD_NUMBER", "0")
+    channel = os.environ.get("HALO_BUILD_CHANNEL", "main")
     if not number.isdigit():
         number = "0"
+    if channel not in ("main", "testing"):
+        raise RuntimeError("HALO_BUILD_CHANNEL must be main or testing")
     flavor = "release" if release else "debug"
     return (f'-DHALO_BUILD_NUMBER={number} -DHALO_BUILD_FLAVOR=\\"{flavor}\\" '
+            f'-DHALO_BUILD_CHANNEL=\\"{channel}\\" '
             f'-DHALO_BUILD_REPOSITORY=\\"{build_repository()}\\"')
 
 def configuration_defines(sln: Any) -> List[str]:

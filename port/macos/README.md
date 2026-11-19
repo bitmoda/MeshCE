@@ -11,4 +11,4 @@ python3 tools/macos_setup.py
 python3 tools/macos_build.py --no-data-path
 ```
 
-The result is `build/macos/OpenCE.app`. The first launch asks for the game data. Updates stay off unless a build number is passed, and they look at OpenCommunityEdition/OpenCE, not MeshCE.
+The result is `build/macos/OpenCE.app`. The first launch asks for the game data. Updates stay off unless a build number is passed. A numbered build looks at `bitmoda/MeshCE` for `opence-build-N` and `opence-testing-N`, and for `opence-macos-arm64.dmg`.

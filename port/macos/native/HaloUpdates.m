@@ -80,23 +80,14 @@ static NSRegularExpression *patternWith(NSString *expression) {
 static NSRegularExpression *buildTagPattern(void) {
     static NSRegularExpression *pattern;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ pattern = patternWith(@"^build-([0-9]+)$"); });
+    dispatch_once(&once, ^{ pattern = patternWith(@"^opence-build-([0-9]+)$"); });
     return pattern;
 }
 
 static NSRegularExpression *testingTagPattern(void) {
     static NSRegularExpression *pattern;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ pattern = patternWith(@"^testing-([0-9]+)$"); });
-    return pattern;
-}
-
-static NSRegularExpression *legacyTagPattern(void) {
-    static NSRegularExpression *pattern;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        pattern = patternWith(@"^test-v[0-9.]+-net([0-9]+)-mac([0-9]+)$");
-    });
+    dispatch_once(&once, ^{ pattern = patternWith(@"^opence-testing-([0-9]+)$"); });
     return pattern;
 }
 
@@ -116,31 +107,26 @@ long HaloForkUpdateBuildFromTag(NSString *tag) {
     if (build) return tagGroup(tag, build, 1).integerValue;
     NSTextCheckingResult *testing = tagMatch(testingTagPattern(), tag);
     if (testing) return tagGroup(tag, testing, 1).integerValue;
-    NSTextCheckingResult *legacy = tagMatch(legacyTagPattern(), tag);
-    if (!legacy) return 0;
-    return tagGroup(tag, legacy, 2).integerValue;
+    return 0;
 }
 
 NSString *HaloForkUpdateChannelFromTag(NSString *tag) {
-    if (tagMatch(buildTagPattern(), tag) || tagMatch(legacyTagPattern(), tag)) return @"main";
+    if (tagMatch(buildTagPattern(), tag)) return @"main";
     if (tagMatch(testingTagPattern(), tag)) return @"testing";
     return nil;
 }
 
 NSString *HaloForkUpdateAssetName(NSString *tag) {
     if (tagMatch(buildTagPattern(), tag) || tagMatch(testingTagPattern(), tag))
-        return @"OpenCE-macos-arm64.dmg";
-    NSTextCheckingResult *legacy = tagMatch(legacyTagPattern(), tag);
-    if (!legacy) return nil;
-    return [NSString stringWithFormat:@"OpenCE-macos-arm64-net%@-mac%@.dmg",
-        tagGroup(tag, legacy, 1), tagGroup(tag, legacy, 2)];
+        return @"opence-macos-arm64.dmg";
+    return nil;
 }
 
 BOOL HaloForkUpdateDownloadIsTrusted(NSString *tag, NSString *url) {
     NSString *asset = HaloForkUpdateAssetName(tag);
     if (!asset || ![url isKindOfClass:NSString.class]) return NO;
     NSString *expected = [NSString stringWithFormat:
-        @"https://github.com/OpenCommunityEdition/OpenCE/releases/download/%@/%@", tag, asset];
+        @"https://github.com/bitmoda/MeshCE/releases/download/%@/%@", tag, asset];
     return [url isEqualToString:expected];
 }
 
@@ -231,9 +217,9 @@ long HaloForkNewestMacRelease(NSArray *releases, NSString **tagOut, NSString **u
     return best;
 }
 
-/* testing-N is a prerelease so a build that is not looking for one skips it.
-   A normal release with that tag is not taken: publishing it that way would
-   also make GitHub call it the latest release. */
+/* opence-testing-N is a prerelease so a build that is not looking for one
+   skips it. A normal release with that tag is not taken: publishing it that
+   way would also make GitHub call it the latest release. */
 static long newestTestingRelease(NSArray *releases, NSString **tagOut, NSString **urlOut) {
     long best = 0;
     NSString *tag = nil;
@@ -493,7 +479,7 @@ NSString *HaloConfigUpdateAnswer(NSString *text) {
            The page is only the newest hundred tags. A run of testing
            prereleases can push the main release off it, so the one GitHub
            calls latest (never a prerelease) is added too. */
-        NSURL *api = [NSURL URLWithString:@"https://api.github.com/repos/OpenCommunityEdition/OpenCE/releases?per_page=100"];
+        NSURL *api = [NSURL URLWithString:@"https://api.github.com/repos/bitmoda/MeshCE/releases?per_page=100"];
         NSData *body = [self fetch:api method:@"GET" error:&error];
         id json = body ? [NSJSONSerialization JSONObjectWithData:body options:0 error:&error] : nil;
         if (!error && ![json isKindOfClass:NSArray.class])
@@ -501,7 +487,7 @@ NSString *HaloConfigUpdateAnswer(NSString *text) {
         if (!error) {
             NSMutableArray *releases = [json mutableCopy];
             NSError *latestError = nil;
-            NSURL *latestURL = [NSURL URLWithString:@"https://api.github.com/repos/OpenCommunityEdition/OpenCE/releases/latest"];
+            NSURL *latestURL = [NSURL URLWithString:@"https://api.github.com/repos/bitmoda/MeshCE/releases/latest"];
             NSData *latestBody = [self fetch:latestURL method:@"GET" error:&latestError];
             id latestJSON = latestBody ? [NSJSONSerialization JSONObjectWithData:latestBody options:0 error:&latestError] : nil;
             NSString *found = nil;
@@ -554,7 +540,7 @@ NSString *HaloConfigUpdateAnswer(NSString *text) {
 
 - (BOOL)installDownload:(NSURL *)download expectedBuild:(long)build historyDirectory:(NSURL *)historyDirectory
     error:(NSError **)error progress:(void (^)(unsigned long long, unsigned long long))progress {
-    /* path is /OpenCommunityEdition/OpenCE/releases/download/<tag>/<asset> */
+    /* path is /bitmoda/MeshCE/releases/download/<tag>/<asset> */
     NSArray<NSString *> *parts = [download.path componentsSeparatedByString:@"/"];
     NSString *tag = parts.count >= 2 ? parts[parts.count - 2] : nil;
     NSString *incoming = HaloForkUpdateChannelFromTag(tag);
