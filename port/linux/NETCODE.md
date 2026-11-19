@@ -247,7 +247,10 @@ uses OpenCE's game record, 16 bytes longer, and OpenCE's message numbers
 91 through 95 (shield effects, a client's build, a shot's origin, and a
 dedicated server's map vote). This build's match start, split screen, and
 blasts are messages 96 through 101. A host that never sends the match start
-is joined once its clock is moving.
+is joined once its clock is moving. Version 42 is the peer mesh and Find
+Game. Messages 102 through 106 are a vehicle ejection, the host's mods
+policy and its answer, a machine's peer id, and a signed kick report. A
+machine of another version does not join.
 
 This Mac build plays that options record (time limit, loadout, friendly fire,
 vehicle respawn, team balance, radar, vehicle sets, and no-map-weapons) and
@@ -418,7 +421,7 @@ matching builds so an older client cannot silently ignore the rule.
 
 The host tells every other machine to play the map's own tags. It sends
 distributed message 103 reliably when a client is ready. A client answers
-with message 104. The network version stays 41. A machine that does not
+with message 104. The network version is 42. A machine that does not
 answer is dropped, so an older client cannot keep its own tags in that
 game. The choice is not a simulated rule.
 

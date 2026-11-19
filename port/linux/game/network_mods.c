@@ -1,6 +1,6 @@
 /* The host tells every other machine to play the map's own tags. A machine
 that does not answer is dropped, so an older client cannot keep its own
-tags in that game. The network version stays as it is. */
+tags in that game. These messages are part of network version 42. */
 #include "cseries.h"
 #include "errors.h"
 #include "game/game.h"

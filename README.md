@@ -18,7 +18,26 @@
 
 **MeshCE** is Halo: Combat Evolved for Mac, Windows, and Linux. It follows [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), which continues the decompilation of Xbox development build 2342, from [bnunu/halo-1](https://github.com/bnunu/halo-1), itself a fork of [punpckhdq/halo](https://github.com/punpckhdq/halo). Mac, Windows, and Linux each run the game's own code, with a new layer in place of the Xbox hardware. Windows and Linux draw with OpenGL. The Mac build draws with Metal. Sound, input, and gamepads go through SDL3.
 
-You can play with up to 128 players, run campaign co-op online, host a game peer to peer, join from an invite link, and use Find Game for Free for all, 2v2, and Ranked. Field of view and smooth motion are optional. With Smooth Motion on, the game draws a frame for every refresh of the display. The simulation stays at 30 ticks a second, as on the Xbox. The maps are the original Xbox maps.
+## Mesh matchmaking
+
+Mesh matchmaking is how players find a game. On the multiplayer menu, Find Game searches Free for all, 2v2, and Ranked. The search runs on the players' own computers. A new install says hello to the built-in introducer, `bitmoda.ddns.net`, and to players that machine has already heard. Players on the same local network are found by broadcast, and a player met before is tried again at the saved address. The player with the best connection hosts. Rank and games played change for a match found this way. A custom game joined from an invite link leaves them unchanged. Mac, Windows, and Linux speak network version 42. See [docs/peer-mesh.md](docs/peer-mesh.md).
+
+The mesh and the game use these UDP ports. Allow them inbound and outbound in the firewall. On Mac, allow MeshCE when the system asks to find devices on the local network. That permission is the broadcast on 38952. On Windows, allow `halo.exe` when the firewall asks.
+
+| Port | Use |
+| --- | --- |
+| 38950 | Game server |
+| 38951 | Game client |
+| 38952 | Mesh discovery. The local broadcast and `bitmoda.ddns.net` both use this port. |
+| 38960 | Ranked |
+| 38961 | Free for all |
+| 38962 | 2v2 |
+
+On a home router, forward those UDP ports to this machine, or leave UPnP on so the game can ask the router. UPnP is `network.allow_upnp` in `config.toml`. The default is on. Internet play also opens one UDP socket for the game tunnel. `network.tunnel_port` chooses it. `0` lets the system pick a port, and UPnP forwards that port. Set `network.tunnel_port` to a UDP port you have forwarded when the router gives each destination its own port. One copy of the game listens on 38952.
+
+Players on one Wi-Fi find each other by the broadcast on 38952. A machine that can receive these ports can host for players whose network only sends packets out. A phone hotspot keeps inbound UDP closed at the carrier, so a forward on the phone stays on the phone. Players meet when they share a network, or when one of them can receive inbound UDP on these ports.
+
+You can also play with up to 128 players, run campaign co-op online, and host a custom game that others join from an invite link. Field of view and smooth motion are optional. With Smooth Motion on, the game draws a frame for every refresh of the display. The simulation stays at 30 ticks a second, as on the Xbox. The maps are the original Xbox maps.
 
 ## Download
 
@@ -85,7 +104,7 @@ On Windows and Linux, `maps` sits next to the executable, whether that first sta
 - **Up to 128 players** on up to 128 machines, and up to 4 players on one device in split screen.
 - **Mac, Windows, and Linux play together.** On a local network they can play LAN. A LAN game does not need an invite.
 - **Peer-to-peer internet hosting.** The host's invite link names that host's address and public key. Opening the link connects to the host. With Discord running, the host can send the same invite through Discord.
-- **Find Game.** On the multiplayer menu, Free for all, 2v2, and Ranked look for other MeshCE players. A new install reaches the built-in introducer, `bitmoda.ddns.net`, and meets the players that machine has heard. Players on the same local network are found by broadcast, and a player met before is tried again at the saved address. The player with the best connection hosts. The mesh does not carry a game between two routers that have no path between them. Rank and games played change for a match found this way. A game joined from an invite link leaves rank and games played unchanged. See [docs/peer-mesh.md](docs/peer-mesh.md).
+- **Find Game.** Free for all, 2v2, and Ranked use the mesh at the top of this page, on the UDP ports listed there. Rank and games played change for a match found this way. A custom game joined from an invite link leaves them unchanged.
 - **Online co-op campaign,** with friendly fire, player collisions, and more enemies as the player count grows.
 - **Voice chat:** push to talk (V) or an open microphone, changed in the audio settings.
 - **Moderation:** the host can kick and ban from the scoreboard, or with the `kick` and `ban` console commands. Players can vote to kick.

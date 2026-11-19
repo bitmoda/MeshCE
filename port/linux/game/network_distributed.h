@@ -175,12 +175,12 @@ enum
 	/* the host's MODS choice (network_mods.c): allowed or not, reliably,
 	when a client is ready and when the choice changes. a client answers.
 	a machine that does not answer is dropped from a game that does not
-	allow mods. the network version stays as it is. */
+	allow mods. part of network version 42. */
 	_distributed_message_mods_policy = 103,
 	_distributed_message_mods_ack = 104,
 	/* this machine's peer id (network_peer.c), signed, so a vote can name
 	that id. the host sends each client's id on. a build that does not know
-	the message drops it. the network version stays as it is. */
+	the message drops it. part of network version 42. */
 	_distributed_message_peer_id = 105,
 	/* a signed report against the peer id of the player being voted on. */
 	_distributed_message_peer_report = 106,

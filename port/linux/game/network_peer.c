@@ -6,8 +6,9 @@ against that id. The host keeps the reports. More than half the players, and
 at least two, ban the id on the peer mesh. That is the same count that
 removes the player from the game. A vote that ends short of that count is
 still reported. Thirty three of those votes ban the id, starting at the
-middle of the cooldown. The network version stays as it is: a machine that
-does not know these messages drops them.
+middle of the cooldown. The network version is 42. A machine of another
+version does not join. A machine that does not know these messages drops
+them.
 */
 
 #include "cseries.h"

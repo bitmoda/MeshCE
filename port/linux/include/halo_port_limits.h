@@ -66,6 +66,9 @@ is newer (network_client_manager.c). A host advertises it, with its netcode,
 in its game's advertisement's reserved bytes (network_server_message_handler.c),
 which hosts built before there was a version send as zeros: version 0.
 Raise it with any change to what the machines send each other.
+42: the peer mesh and Find Game. Messages 102 through 106 are a vehicle
+ejection, the host's mods policy and its answer, a machine's peer id, and
+a signed kick report. A version 41 client does not join.
 41: the same record and message numbers as MeshCE. Messages 91 through 95
 are shield effects, a client's build, a shot's origin, and a dedicated
 server's map vote. This build's match start, split screen, and blasts
@@ -73,7 +76,7 @@ follow those. The gametype options are 16 bytes longer.
 36: a blast is sent where the shooter set it off, so every machine plays it
 there, including one that hit nobody.
 35: a match starts from one host message, after every machine's world is ready. */
-#define HALO_PORT_NETWORK_VERSION 41
+#define HALO_PORT_NETWORK_VERSION 42
 /* ... the advertisement's reserved bytes: the version (a little-endian word),
 then flags */
 #define HALO_PORT_ADVERTISED_VERSION_OFFSET 0
