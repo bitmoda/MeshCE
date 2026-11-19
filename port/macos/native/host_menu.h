@@ -19,5 +19,8 @@ void host_sdl_show_game(void);
 void host_sdl_background_game(void);
 int host_sdl_game_is_background(void);
 void host_sdl_request_quit(void);
+/* The fullscreen frame is moved from AppKit. ANGLE keeps the layer it was
+   given, so the window surface is made again from the layer now in the window. */
+void host_sdl_refresh_metal_surface(void);
 void host_menu_note_background(int hidden);
 #endif

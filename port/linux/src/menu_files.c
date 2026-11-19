@@ -1033,6 +1033,8 @@ static struct
 	char *png;
 	unsigned int texture;
 	unsigned long levels;
+	unsigned char *pixels;
+	unsigned long pixel_width, pixel_height;
 	int failed;
 } art[MAXIMUM_ART];
 static long art_count;
@@ -1072,11 +1074,15 @@ void halo_menus_art_register(void const *texture, char const *png)
 	else
 	{
 		free(art[index].png);
+		free(art[index].pixels);
 		if (art[index].texture)
 		{
 			xgpu_gl_texture_deleted(art[index].texture);
 			glDeleteTextures(1, &art[index].texture);
 		}
+#if defined(HALO_MACOS_NATIVE_METAL)
+		halo_metal_menu_art_drop(art[index].data);
+#endif
 	}
 	memset(&art[index], 0, sizeof(art[index]));
 	art[index].data = data;
@@ -1091,6 +1097,7 @@ void halo_menus_art_forget(void)
 	for (index = 0; index < art_count; index++)
 	{
 		free(art[index].png);
+		free(art[index].pixels);
 		if (art[index].texture)
 		{
 			xgpu_gl_texture_deleted(art[index].texture);
@@ -1099,6 +1106,9 @@ void halo_menus_art_forget(void)
 	}
 	art_count = 0;
 	memset(art_filter, 0, sizeof(art_filter));
+#if defined(HALO_MACOS_NATIVE_METAL)
+	halo_metal_menu_art_forget();
+#endif
 }
 
 unsigned int menu_art_texture(unsigned long data, unsigned long *levels)
@@ -1119,7 +1129,11 @@ unsigned int menu_art_texture(unsigned long data, unsigned long *levels)
 	if (!art[index].texture)
 	{
 		unsigned long size = 0;
-		const unsigned char *png = file_data(art[index].png, &size);
+		const unsigned char *png;
+
+		if (!xgpu_gl_ready())
+			return 0;
+		png = file_data(art[index].png, &size);
 
 		art[index].texture = png ? hud_hires_png_texture(png, size, &art[index].levels) : 0;
 		if (!art[index].texture)
@@ -1131,4 +1145,47 @@ unsigned int menu_art_texture(unsigned long data, unsigned long *levels)
 	}
 	*levels = art[index].levels;
 	return art[index].texture;
+}
+
+int menu_art_pixels(unsigned long data, unsigned char **rgba, unsigned long *width, unsigned long *height)
+{
+	long index;
+	unsigned long size = 0, decoded_width = 0, decoded_height = 0;
+	const unsigned char *png;
+	unsigned char *pixels;
+
+	if (rgba)
+		*rgba = NULL;
+	if (width)
+		*width = 0;
+	if (height)
+		*height = 0;
+	if (!rgba || !width || !height || !data)
+		return 0;
+	for (index = 0; index < art_count; index++)
+	{
+		if (art[index].data == data)
+			break;
+	}
+	if (index == art_count || art[index].failed || !art[index].png)
+		return 0;
+	if (!art[index].pixels)
+	{
+		png = file_data(art[index].png, &size);
+		pixels = png ? hud_hires_png_pixels(png, size, &decoded_width, &decoded_height) : NULL;
+		if (!pixels || !decoded_width || !decoded_height || decoded_width > 8192 || decoded_height > 8192)
+		{
+			platform_log("menus: could not draw %s", art[index].png);
+			free(pixels);
+			art[index].failed = 1;
+			return 0;
+		}
+		art[index].pixels = pixels;
+		art[index].pixel_width = decoded_width;
+		art[index].pixel_height = decoded_height;
+	}
+	*rgba = art[index].pixels;
+	*width = art[index].pixel_width;
+	*height = art[index].pixel_height;
+	return 1;
 }

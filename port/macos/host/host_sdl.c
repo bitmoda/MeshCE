@@ -104,6 +104,7 @@ static void *handle_release(uint32_t handle, int type) {
 static EGLDisplay metal_display;
 static EGLContext metal_context;
 static EGLSurface metal_surface;
+static EGLConfig metal_config;
 static int requested_minor;
 #endif
 static SDL_Window *metal_window;
@@ -408,27 +409,26 @@ uint32_t host_sdl_gl_create_context(uint32_t window) {
                                        EGL_STENCIL_SIZE,
                                        8,
                                        EGL_NONE};
-    EGLConfig config;
-    if (!eglChooseConfig(metal_display, configAttributes, &config, 1, &count) || !count)
+    if (!eglChooseConfig(metal_display, configAttributes, &metal_config, 1, &count) || !count)
         return 0;
 #ifdef HALO_APPLE_GRAPHICS
     extern void halo_graphics_attach(EGLDisplay display, EGLConfig configuration);
-    halo_graphics_attach(metal_display, config);
+    halo_graphics_attach(metal_display, metal_config);
 #endif
     eglBindAPI(EGL_OPENGL_ES_API);
     const EGLint contextAttributes[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
-    metal_context = eglCreateContext(metal_display, config, EGL_NO_CONTEXT, contextAttributes);
+    metal_context = eglCreateContext(metal_display, metal_config, EGL_NO_CONTEXT, contextAttributes);
     if (metal_window_hidden) {
         /* Isolated launch/input checks use the shipped host without taking
            focus or capturing the user's mouse. Ordinary launches use MetalView. */
         int width, height;
         SDL_GetWindowSizeInPixels(object, &width, &height);
         const EGLint size[] = {EGL_WIDTH, width, EGL_HEIGHT, height, EGL_NONE};
-        metal_surface = eglCreatePbufferSurface(metal_display, config, size);
+        metal_surface = eglCreatePbufferSurface(metal_display, metal_config, size);
     } else {
         metal_view = SDL_Metal_CreateView(object);
         metal_surface = eglCreateWindowSurface(
-            metal_display, config, (EGLNativeWindowType)SDL_Metal_GetLayer(metal_view), NULL);
+            metal_display, metal_config, (EGLNativeWindowType)SDL_Metal_GetLayer(metal_view), NULL);
     }
     if (metal_context == EGL_NO_CONTEXT || metal_surface == EGL_NO_SURFACE) {
         SDL_SetError("Cannot create Metal surface: %x", eglGetError());
@@ -491,6 +491,40 @@ int host_sdl_gl_swap_window(uint32_t window) {
     return result;
 }
 #endif
+
+void host_sdl_refresh_metal_surface(void)
+{
+#if !defined(HALO_MACOS_NATIVE_METAL)
+    EGLSurface replacement;
+
+    if (metal_window_hidden || !metal_view || metal_display == EGL_NO_DISPLAY ||
+        metal_context == EGL_NO_CONTEXT || !metal_config)
+        return;
+    if (metal_surface != EGL_NO_SURFACE) {
+        eglMakeCurrent(metal_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(metal_display, metal_surface);
+        metal_surface = EGL_NO_SURFACE;
+    }
+    replacement = eglCreateWindowSurface(
+        metal_display, metal_config, (EGLNativeWindowType)SDL_Metal_GetLayer(metal_view), NULL);
+    if (replacement == EGL_NO_SURFACE) {
+        host_logf(HOST_LOG_WARN, "The window surface could not be made again: %x", eglGetError());
+        return;
+    }
+    metal_surface = replacement;
+    if (!eglMakeCurrent(metal_display, metal_surface, metal_surface, metal_context)) {
+        host_logf(HOST_LOG_WARN, "The window surface could not be bound: %x", eglGetError());
+        return;
+    }
+    {
+        int width = 0, height = 0;
+
+        if (metal_window)
+            SDL_GetWindowSizeInPixels(metal_window, &width, &height);
+        host_logf(HOST_LOG_INFO, "Window surface made again at %dx%d", width, height);
+    }
+#endif
+}
 
 int host_sdl_poll_event(void *event) {
     SDL_Event host_event;

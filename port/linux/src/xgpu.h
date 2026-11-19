@@ -116,11 +116,20 @@ NORMPACKED3 32-bit integers and unpacked in the shader. With lighting (else
 NULL), the normal and world position go to the pixel shader too, which
 lights the diffuse color for each pixel (nv2a_pixel_shader_key
 per_pixel_lighting). Returns a malloc'd string. */
+#if defined(HALO_MACOS_NATIVE_METAL)
+char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
+	unsigned long packed_attribute_mask);
+char *nv2a_vertex_shader_to_msl(const DWORD *instructions, unsigned long instruction_count,
+	unsigned long packed_attribute_mask);
+char *nv2a_vertex_shader_to_msl_compact(const DWORD *instructions, unsigned long instruction_count,
+	unsigned long packed_attribute_mask);
+#else
 char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
 	unsigned long packed_attribute_mask, const struct nv2a_vertex_lighting *lighting);
 /* the fixed-function pipeline's vertex shader (the loading screen's draws):
 positions already in clip space. Returns a malloc'd string. */
 char *nv2a_fixed_function_glsl(void);
+#endif
 
 /* ---------- pixel shaders */
 
@@ -144,6 +153,11 @@ struct nv2a_pixel_shader_key
 	/* D3DTSS_COLORSIGN: channels (bit 0 alpha ... bit 3 blue, as
 	D3DTSIGN_*) that hold signed data in an unsigned texture format */
 	unsigned char color_sign[4];
+	/* GLES without texture_border_clamp: non-mipmapped 2D textures only.
+	Bit 0/1 select U/V; filtering bit 0/1 selects linear min/magnification.
+	The native Metal translator reads these. The GL translator leaves them 0. */
+	unsigned char border_axes[4];
+	unsigned char border_filter[4];
 	/* D3DCMP_* function for the alpha test, or 0 when disabled */
 	unsigned long alpha_test_function;
 	unsigned char fog_enable;
@@ -180,6 +194,9 @@ struct nv2a_pixel_shader_key
 };
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
+#if defined(HALO_MACOS_NATIVE_METAL)
+char *nv2a_pixel_shader_to_msl(const struct nv2a_pixel_shader_key *key);
+#endif
 
 #ifdef HALO_GLES
 /* ES samplers have no LOD bias of their own */
@@ -225,6 +242,57 @@ struct xgpu_texture_description
 	BOOL hires_point_threshold; /* ... whose red holds discrete segment data */
 	BOOL ce_meter_channels;
 };
+
+/* CPU copy of one authored mip. Compressed levels stay in their blocks.
+Other color formats become tightly packed bytes. Cube faces stay in the
+original +X,-X,+Y,-Y,+Z,-Z order. The native Metal frontend uploads these. */
+enum xgpu_texture_copy_order
+{
+	_xgpu_texture_copy_rgba, _xgpu_texture_copy_bgra,
+};
+
+enum xgpu_texture_copy_format
+{
+	_xgpu_texture_copy_rgba8 = 1, _xgpu_texture_copy_bgra8,
+	_xgpu_texture_copy_bc1, _xgpu_texture_copy_bc2, _xgpu_texture_copy_bc3,
+};
+
+enum xgpu_texture_copy_status
+{
+	_xgpu_texture_copy_ok = 0, _xgpu_texture_copy_invalid = -1,
+	_xgpu_texture_copy_unsupported = -2, _xgpu_texture_copy_bounds = -3,
+};
+
+struct xgpu_texture_mip_layout
+{
+	unsigned long texture_width, texture_height, levels, faces;
+	unsigned long face, level, width, height;
+	unsigned long source_face_pitch, source_total_size, source_offset, source_size, source_row_pitch;
+	unsigned long output_row_pitch, output_size;
+	enum xgpu_texture_copy_format format;
+};
+
+enum xgpu_texture_copy_status xgpu_texture_mip_layout(DWORD format_word, DWORD size_word,
+	unsigned long face, unsigned long level, enum xgpu_texture_copy_order order,
+	struct xgpu_texture_mip_layout *layout);
+enum xgpu_texture_copy_status xgpu_texture_mip_copy(DWORD format_word, DWORD size_word,
+	const void *source, unsigned long source_bytes, const D3DCOLOR *palette, unsigned long palette_entries,
+	unsigned long face, unsigned long level, enum xgpu_texture_copy_order order,
+	void *destination, unsigned long destination_bytes, struct xgpu_texture_mip_layout *layout);
+
+struct xgpu_texture_volume_mip_layout
+{
+	struct xgpu_texture_mip_layout mip;
+	unsigned long texture_depth, depth, source_image_pitch, output_image_pitch;
+};
+
+enum xgpu_texture_copy_status xgpu_texture_volume_mip_layout(DWORD format_word, DWORD size_word,
+	unsigned long face, unsigned long level, enum xgpu_texture_copy_order order,
+	struct xgpu_texture_volume_mip_layout *layout);
+enum xgpu_texture_copy_status xgpu_texture_volume_mip_copy(DWORD format_word, DWORD size_word,
+	const void *source, unsigned long source_bytes, const D3DCOLOR *palette, unsigned long palette_entries,
+	unsigned long face, unsigned long level, enum xgpu_texture_copy_order order,
+	void *destination, unsigned long destination_bytes, struct xgpu_texture_volume_mip_layout *layout);
 
 void xgpu_texture_describe(DWORD format_word, DWORD size_word, struct xgpu_texture_description *description);
 /* bytes of one face, mip levels included (cube faces are padded) */

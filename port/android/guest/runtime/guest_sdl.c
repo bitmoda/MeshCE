@@ -155,6 +155,25 @@ bool SDL_GetWindowSizeInPixels(SDL_Window *window, int *width, int *height)
 	return true;
 }
 
+#if defined(HALO_MACOS)
+bool SDL_GetWindowSize(SDL_Window *window, int *width, int *height)
+{
+	int w = 0, h = 0;
+
+	host_sdl_window_size((unsigned int)window, &w, &h);
+	if (width)
+		*width = w;
+	if (height)
+		*height = h;
+	return w > 0 && h > 0;
+}
+
+void SDL_WarpMouseInWindow(SDL_Window *window, float x, float y)
+{
+	host_sdl_warp_mouse((unsigned int)window, x, y);
+}
+#endif
+
 bool SDL_SetWindowRelativeMouseMode(SDL_Window *window, bool enabled)
 {
 	return host_sdl_set_relative_mouse((unsigned int)window, enabled) != 0;
@@ -162,28 +181,63 @@ bool SDL_SetWindowRelativeMouseMode(SDL_Window *window, bool enabled)
 
 bool SDL_GL_SetAttribute(SDL_GLAttr attribute, int value)
 {
+#if defined(HALO_MACOS_NATIVE_METAL)
+	(void)attribute;
+	(void)value;
+	return false;
+#else
 	return host_sdl_gl_set_attribute((int)attribute, value) != 0;
+#endif
 }
 
 SDL_GLContext SDL_GL_CreateContext(SDL_Window *window)
 {
+#if defined(HALO_MACOS_NATIVE_METAL)
+	(void)window;
+	return NULL;
+#else
 	return (SDL_GLContext)host_sdl_gl_create_context((unsigned int)window);
+#endif
 }
 
 bool SDL_GL_MakeCurrent(SDL_Window *window, SDL_GLContext context)
 {
+#if defined(HALO_MACOS_NATIVE_METAL)
+	(void)window;
+	(void)context;
+	return false;
+#else
 	return host_sdl_gl_make_current((unsigned int)window, (unsigned int)context) != 0;
+#endif
 }
 
 bool SDL_GL_SetSwapInterval(int interval)
 {
+#if defined(HALO_MACOS_NATIVE_METAL)
+	(void)interval;
+	return false;
+#else
 	return host_sdl_gl_set_swap_interval(interval) != 0;
+#endif
 }
 
 bool SDL_GL_SwapWindow(SDL_Window *window)
 {
+#if defined(HALO_MACOS_NATIVE_METAL)
+	(void)window;
+	return false;
+#else
 	return host_sdl_gl_swap_window((unsigned int)window) != 0;
+#endif
 }
+
+#if defined(HALO_MACOS_NATIVE_METAL)
+SDL_FunctionPointer guest_gl_get_proc_address(const char *name)
+{
+	(void)name;
+	return NULL;
+}
+#endif
 
 SDL_FunctionPointer SDL_GL_GetProcAddress(const char *name)
 {

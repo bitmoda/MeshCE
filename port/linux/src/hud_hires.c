@@ -311,6 +311,21 @@ void hud_hires_register_placeholder(long asset, const unsigned long *texture)
 	placeholder_filter_build();
 }
 
+long hud_hires_placeholder_asset(unsigned long data)
+{
+	unsigned long bit = placeholder_filter_bit(data);
+	long index;
+
+	if (!data || !(placeholder_filter[bit >> 3] & (unsigned char)(1 << (bit & 7))))
+		return -1;
+	for (index = 0; index < placeholder_count; index++)
+	{
+		if (placeholders[index].data == data)
+			return placeholders[index].asset;
+	}
+	return -1;
+}
+
 unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels)
 {
 	unsigned long bit = placeholder_filter_bit(data);
@@ -605,6 +620,42 @@ failed:
 	free(filtered);
 	free(pixels);
 	return NULL;
+}
+
+unsigned char *hud_hires_png_pixels(const void *png, unsigned long size, unsigned long *width, unsigned long *height)
+{
+	if (width)
+		*width = 0;
+	if (height)
+		*height = 0;
+	if (!png || !size || !width || !height)
+		return NULL;
+	return png_decode(png, size, width, height);
+}
+
+unsigned char *hud_hires_override_pixels(long asset, unsigned long *width, unsigned long *height)
+{
+	const struct hud_hires_embedded *embedded;
+	unsigned char *pixels;
+	unsigned long decoded_width = 0, decoded_height = 0;
+
+	if (width)
+		*width = 0;
+	if (height)
+		*height = 0;
+	if (!width || !height || asset < 0 || asset >= hud_hires_asset_count() || textures[asset].failed)
+		return NULL;
+	embedded = &hud_hires_embedded[asset];
+	pixels = png_decode((const unsigned char *)embedded->png, embedded->png_size, &decoded_width, &decoded_height);
+	if (!pixels)
+	{
+		platform_log("high-res hud: could not decode the texture for %s bitmap %d", embedded->tag, embedded->bitmap);
+		textures[asset].failed = 1;
+		return NULL;
+	}
+	*width = decoded_width;
+	*height = decoded_height;
+	return pixels;
 }
 
 /* a GL texture of a decoded PNG's texels (which it frees), as below */

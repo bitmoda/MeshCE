@@ -179,6 +179,8 @@ void *halo_custom_edition_tag_cache(void);
 (xbox_textures.c; also declared for the game there) */
 void halo_custom_edition_texels_channels(const void *texels, unsigned char channel_order);
 void halo_custom_edition_texels_forget(void);
+/* A meter draw of a sheet still stored in the Xbox channel order. */
+int halo_custom_edition_meter_channels(const void *texels);
 
 /* ---------- guest memory write tracking (memory_watch.c)
 

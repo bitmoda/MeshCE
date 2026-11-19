@@ -530,7 +530,7 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     ])
     guest_host_only = {"memory_watch.c"}  # replaced by guest_memory_watch.c
     if native_metal:
-        guest_host_only.update({"d3d8_gl.c", "gl_functions.c", "xgpu_post.c"})
+        guest_host_only.update({"d3d8_gl.c", "gl_functions.c", "xgpu_post.c", "nv2a_vsh.c", "nv2a_psh.c"})
     else:
         # The Metal frontend is the Mac guest's. Desktop and Android builds keep their own renderer.
         guest_host_only.update({"d3d8_metal.c", "halo_frame_pacing.c"})
@@ -539,6 +539,13 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         if source.name.startswith("posix_") or source.name in guest_host_only:
             continue
         objects.append(guest_object(source, platform_cflags))
+    if native_metal:
+        for source in (
+            Path("port/macos/guest-metal/nv2a_vsh.c"),
+            Path("port/macos/guest-metal/nv2a_psh.c"),
+            Path("port/macos/guest-metal/metal_gl_stubs.c"),
+        ):
+            objects.append(guest_object(source, platform_cflags))
     # the high-res HUD's textures (port/assets/hud; port/linux/src/hud_hires.c)
     for source in hud_assets_build(n, "android", gen_dir / "hud_hires_assets.c"):
         objects.append(guest_object(source, platform_cflags))

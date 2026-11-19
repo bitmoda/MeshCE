@@ -1,7 +1,9 @@
 /* Services the Android host provides. This Mac host does not run that app.
 A zero result tells the guest the service is absent. */
 int host_android_chip_family(void) { return 0; }
+#if !defined(HALO_MACOS_NATIVE_METAL)
 void host_metal_forget_warmup(void) {}
+#endif
 long long host_mcc_memory_reserve(unsigned int address, unsigned int size)
 {
     (void)address;

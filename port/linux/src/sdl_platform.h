@@ -14,6 +14,13 @@ controller emulation (see sdl_platform.c).
 
 #define PLATFORM_MOUSE_BUTTON_COUNT 8
 
+/* The Mac guest is built with the Android ABI and still has a mouse. */
+#if !defined(HALO_ANDROID) || (defined(HALO_MACOS) && !defined(HALO_IOS))
+#define HALO_POINTER_MOUSE 1
+#else
+#define HALO_POINTER_MOUSE 0
+#endif
+
 struct platform_input_state
 {
 	unsigned char keys[SDL_SCANCODE_COUNT];
@@ -66,6 +73,9 @@ struct platform_keystroke
 BOOL platform_sdl_initialize(void);
 /* creates the window and makes its OpenGL context current on this thread */
 BOOL platform_video_initialize(unsigned long width, unsigned long height);
+#if defined(HALO_MACOS_NATIVE_METAL)
+unsigned int platform_video_native_window(void);
+#endif
 #ifndef HALO_ANDROID
 BOOL platform_screen_mode(long *width, long *height);
 #endif
@@ -141,7 +151,7 @@ BOOL platform_ui_pointer_read(struct platform_ui_pointer *pointer);
 /* returns the window's size in the units that pointer positions come in,
 which differ from the drawable's pixels on displays that scale */
 void platform_video_window_size(int *width, int *height);
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 /* the open scoreboard's pointer, offered (a network game's) or not: TRUE
 while a right click has freed it, with what it did since the last call */
 BOOL platform_scoreboard_pointer(BOOL offered, struct platform_ui_pointer *pointer);

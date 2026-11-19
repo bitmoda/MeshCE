@@ -288,8 +288,10 @@ static void migrationProgress(void *context, const char *file, unsigned long lon
         NSWindow *native = (__bridge NSWindow *)SDL_GetPointerProperty(SDL_GetWindowProperties(windows[index]),
             SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
         NSScreen *screen = native.screen ?: NSScreen.mainScreen;
-        if (native && screen && !NSEqualRects(native.frame, screen.frame))
+        if (native && screen && !NSEqualRects(native.frame, screen.frame)) {
             [native setFrame:screen.frame display:YES];
+            host_sdl_refresh_metal_surface();
+        }
     }
     SDL_free(windows);
 }

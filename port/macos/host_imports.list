@@ -9,3 +9,6 @@ host_sdl_audio_device_id
 host_sdl_audio_stream_device_name
 # The menu's Quit hides the window. Quit on the menu bar ends the process.
 host_sdl_background_game
+# Point size of the window, and the mouse freed for the menus.
+host_sdl_window_size
+host_sdl_warp_mouse

@@ -60,7 +60,7 @@ static BOOL screenshot_requested;
 /* likewise the mouse buttons pressed since the last read, so that a click
 quicker than a frame still counts */
 static unsigned char mouse_buttons_pressed[PLATFORM_MOUSE_BUTTON_COUNT];
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 /* the menus' pointer (platform_ui_pointer_set_active), under input_lock */
 static struct platform_ui_pointer ui_pointer;
 static float ui_pointer_wheel;
@@ -97,12 +97,12 @@ static Uint64 scoreboard_open_until_ms;
 static float scoreboard_wheel;
 static long scoreboard_notches;
 static long scoreboard_pages;
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 /* the scoreboard's pointer (platform_scoreboard_pointer): while the game
 offers it (a network game's scoreboard is open), a right click frees the
 mouse, whose pointer then picks a player; its motion and clicks go to it,
 not to the aim and the triggers. Another right click, or the scoreboard
-closing, takes the mouse back for the aim. */
+closing, takes the mouse back for the aim. The Mac guest uses it too. */
 static BOOL scoreboard_pointer_offered;
 static struct platform_ui_pointer scoreboard_pointer;
 #endif
@@ -116,9 +116,11 @@ static unsigned long keystroke_head, keystroke_count;
 /* the system's on-screen keyboard shown or hidden as wanted (Steam's, or
 Android's) */
 static void screen_keyboard_update(void);
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 /* dsound_sdl.c's: the output device followed */
 void dsound_sdl_output_device_check(void);
+#endif
+#ifndef HALO_ANDROID
 /* updater.c's: the desktop self-updater */
 void updater_start(void);
 void updater_poll(SDL_Window *window);
@@ -1233,6 +1235,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 		platform_float_window_attributes(TRUE);
 #endif
 
+#if !defined(HALO_MACOS_NATIVE_METAL)
 #ifdef HALO_GLES
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -1259,6 +1262,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	their own takes a fifth of the main thread's time off it. It leaves an
 	explicit mesa_glthread setting alone and other drivers ignore it. */
 	setenv("mesa_glthread", "true", 0);
+#endif
 #endif
 
 #ifdef HALO_ANDROID
@@ -1322,6 +1326,10 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 #ifdef HALO_WINDOWS
 	win32_window_borderless_apply(platform_window);
 #endif
+#if defined(HALO_MACOS_NATIVE_METAL)
+	platform_event_thread = SDL_GetCurrentThreadID();
+	platform_log("native Metal window");
+#else
 	platform_gl_context = SDL_GL_CreateContext(platform_window);
 #ifdef HALO_GLES
 	/* ES 3.2 where the driver has it, otherwise the renderer makes do with
@@ -1353,9 +1361,10 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 
 		/* (Mesa's software renderers: no GPU driver for this window) */
 		if (renderer && (strstr(renderer, "llvmpipe") || strstr(renderer, "softpipe")))
-			platform_log("OpenGL is drawn on the processor, not the GPU (video driver %s): "
-				"refer to \"NVIDIA on Wayland\" in port/linux/README.md", SDL_GetCurrentVideoDriver());
+		platform_log("OpenGL is drawn on the processor, not the GPU (video driver %s): "
+			"refer to \"NVIDIA on Wayland\" in port/linux/README.md", SDL_GetCurrentVideoDriver());
 	}
+#endif
 #endif
 #ifndef HALO_ANDROID
 	{
@@ -1369,6 +1378,13 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 #endif
 	return TRUE;
 }
+
+#if defined(HALO_MACOS_NATIVE_METAL)
+unsigned int platform_video_native_window(void)
+{
+	return (unsigned int)platform_window;
+}
+#endif
 
 /* display.mode, display.resolution (fullscreen's display mode),
 display.window_size (when it changes: the window can be resized) and
@@ -2106,7 +2122,7 @@ void platform_request_quit(void)
 #endif
 }
 
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 /* (under input_lock, on the event thread) the scoreboard's pointer on: the
 mouse freed, at the window's middle, and nothing held for the triggers */
 static void scoreboard_pointer_start(void)
@@ -2164,7 +2180,7 @@ void platform_scoreboard_scroll(int open, long *notches, long *pages)
 		scoreboard_pages = 0;
 	}
 	scoreboard_open_until_ms = open ? now + SCOREBOARD_OPEN_MS : 0;
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 	if (!open)
 		scoreboard_pointer_offered = FALSE;
 #endif
@@ -2274,12 +2290,14 @@ void platform_pump_events(void)
 #endif
 #ifndef HALO_ANDROID
 	updater_poll(platform_window);
+#endif
+#if HALO_POINTER_MOUSE
 	/* (Settings > Audio's output device, as it changes: dsound_sdl.c) */
 	dsound_sdl_output_device_check();
 #endif
 	screen_keyboard_update();
 	pthread_mutex_lock(&input_lock);
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 	/* (the scoreboard closed, or no longer offering it: the pointer goes) */
 	if (scoreboard_pointer_active && (SDL_GetTicks() >= scoreboard_open_until_ms || !scoreboard_pointer_offered ||
 		input_state.ui_pointer))
@@ -2336,7 +2354,7 @@ void platform_pump_events(void)
 #endif
 			break;
 		case SDL_EVENT_MOUSE_MOTION:
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 #ifndef HALO_GLES
 			/* (not the warps: to the middle as a menu opens, and back to
 			where the mouse is held without relative mode) */
@@ -2359,7 +2377,7 @@ void platform_pump_events(void)
 				ui_pointer.moved = TRUE;
 				break;
 			}
-#ifndef HALO_WEB
+#if !defined(HALO_ANDROID) && !defined(HALO_WEB)
 			if (mouse_warp_capture)
 			{
 				if ((int)event.motion.x == mouse_warp_x && (int)event.motion.y == mouse_warp_y)
@@ -2393,7 +2411,7 @@ void platform_pump_events(void)
 				binding_captured_input = INPUT_MOUSE + event.button.button;
 				break;
 			}
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 			/* the open scoreboard's pointer: a right click frees it (and
 			fires nothing), and another takes it back; its clicks pick */
 			if (!input_state.ui_pointer && SDL_GetTicks() < scoreboard_open_until_ms && scoreboard_pointer_offered &&
@@ -2464,7 +2482,7 @@ void platform_pump_events(void)
 				}
 				break;
 			}
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 			if (input_state.ui_pointer)
 			{
 				/* whole notches: smooth-scrolling wheels send fractions */
@@ -2507,7 +2525,7 @@ void platform_pump_events(void)
 		case SDL_EVENT_WINDOW_FOCUS_GAINED:
 			input_state.focused = TRUE;
 			look_at_clipboard = TRUE;
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 			if (!input_state.mouse_released && !input_state.ui_pointer && !scoreboard_pointer_active)
 				platform_mouse_capture(TRUE);
 #endif
@@ -2630,7 +2648,7 @@ int platform_binding_capture_poll(int *input)
 	return result;
 }
 
-#ifndef HALO_ANDROID
+#if HALO_POINTER_MOUSE
 /* ---------- the menus' pointer */
 
 /* While a menu is up the mouse is released, its pointer shows (centered when
@@ -2691,6 +2709,18 @@ void platform_video_window_size(int *width, int *height)
 
 /* ---------- the system's on-screen keyboard */
 
+#if defined(HALO_ANDROID)
+/* The Mac guest has a keyboard. Key events already reach the fields. */
+void platform_screen_keyboard(BOOL show, BOOL password)
+{
+	(void)show;
+	(void)password;
+}
+
+static void screen_keyboard_update(void)
+{
+}
+#else
 /* A menu's text field is typed into (platform_text_field, xinput_sdl.c).
 Where Steam's on-screen keyboard is there to bring up (in Big Picture and in
 the Steam Deck's Game Mode, which ask for it with
@@ -2765,6 +2795,7 @@ static void screen_keyboard_update(void)
 		SDL_DestroyProperties(properties);
 	}
 }
+#endif
 
 #else
 /* ---------- the menus' pointer (the touchscreen)

@@ -7919,36 +7919,71 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			write_key_screenshot(back_buffer);
 #endif
 
+		window_width = window_height = 0;
 		platform_video_drawable_size(&window_width, &window_height);
 		/* letterbox to the back buffer's aspect ratio */
 		width = window_width;
-		height = (int)((long)window_width * back_buffer->target.gl_height / back_buffer->target.gl_width);
+		height = window_width > 0 && back_buffer->target.gl_width > 0 ?
+			(int)((long)window_width * back_buffer->target.gl_height / back_buffer->target.gl_width) : 0;
 		if (height > window_height)
 		{
 			height = window_height;
-			width = (int)((long)window_height * back_buffer->target.gl_width / back_buffer->target.gl_height);
+			width = window_height > 0 && back_buffer->target.gl_height > 0 ?
+				(int)((long)window_height * back_buffer->target.gl_width / back_buffer->target.gl_height) : 0;
 		}
 		x = (window_width - width) / 2;
 		y = (window_height - height) / 2;
+#ifdef HALO_MACOS_GUEST
+		{
+			static int present_logged;
+
+			if (!present_logged)
+			{
+				present_logged = 1;
+				platform_log("present window %dx%d from %lux%lu", window_width, window_height,
+					back_buffer->target.gl_width, back_buffer->target.gl_height);
+			}
+		}
+#endif
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 		glDisable(GL_SCISSOR_TEST);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+#ifdef HALO_GLES
+		{
+			GLenum back = GL_BACK;
+
+			/* The window's draw buffer is GL_BACK. A framebuffer made for
+			   the picture can leave the window with none, and then this
+			   clear and the copy never reach the screen. */
+			glDrawBuffers(1, &back);
+		}
+#endif
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		/* (display.hdr's back buffer, or display.hdr_output's window, by a
 		shader: a blit neither makes the pixels linear nor, on OpenGL ES,
 		converts half floats) */
-		if (!((back_buffer->target.format == GL_RGBA16F || hdr.float_window) &&
-			xgpu_post_present(back_buffer->target.texture, x, y, width, height,
-				hdr.float_window ? hdr.sdr_white : 0.0f)))
 		{
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
-			/* Creating the source framebuffer binds both targets. A cached
-			map can reach this first blit without a loading-screen draw. */
-			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-			/* row 0 of the render target is the top of the picture */
-			glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
-				x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			int copy_with_shader = back_buffer->target.format == GL_RGBA16F || hdr.float_window;
+			float present_scale = hdr.float_window ? hdr.sdr_white : 0.0f;
+
+#ifdef HALO_MACOS_GUEST
+			/* ANGLE's window is not the picture's format, and the copy is
+			   scaled. That blit is rejected, so the window stays the clear. */
+			if (width > 0 && height > 0)
+				copy_with_shader = 1;
+#endif
+			if (!(copy_with_shader &&
+				xgpu_post_present(back_buffer->target.texture, x, y, width, height, present_scale)))
+			{
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
+				/* Creating the source framebuffer binds both targets. A cached
+				map can reach this first blit without a loading-screen draw. */
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+				/* row 0 of the render target is the top of the picture */
+				glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
+					x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			}
 		}
 		/* (the HDR calibration screen's pattern, brighter than the back
 		buffer's white can be) */

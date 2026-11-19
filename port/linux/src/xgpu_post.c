@@ -71,6 +71,7 @@ enum
 	_post_set_fxaa,
 	_post_set_smaa,
 	_post_set_hdr,
+	_post_set_present,
 	_post_set_fill,
 	NUMBER_OF_POST_SETS
 };
@@ -833,7 +834,16 @@ BOOL xgpu_post_present(GLuint texture, int x, int y, int width, int height, floa
 {
 	float rectangle[4];
 
-	if (!xgpu_post_prepare_hdr() || width <= 0 || height <= 0)
+	if (width <= 0 || height <= 0)
+		return FALSE;
+	/* scale 0 is a plain copy. The tone-mapping program is not needed, and
+	   a failure to build it must not take the copy with it. */
+	if (scale > 0.0f)
+	{
+		if (!xgpu_post_prepare_hdr())
+			return FALSE;
+	}
+	else if (!programs_prepare(_post_set_present, _post_program_present, _post_program_present))
 		return FALSE;
 	pass_state();
 	rectangle[0] = (float)x;
@@ -841,6 +851,15 @@ BOOL xgpu_post_present(GLuint texture, int x, int y, int width, int height, floa
 	rectangle[2] = 1.0f / (float)width;
 	rectangle[3] = 1.0f / (float)height;
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+#ifdef HALO_GLES
+	{
+		GLenum back = GL_BACK;
+
+		/* The window takes GL_BACK. Another framebuffer's draw buffer does
+		   not belong to it. */
+		glDrawBuffers(1, &back);
+	}
+#endif
 	glViewport(x, y, width, height);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	texture_bind(0, texture);
