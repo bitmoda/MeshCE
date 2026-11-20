@@ -11,9 +11,9 @@ security-setting change is required for this local build.
 
 ## Download
 
-The current release is build 76. Mac is `MeshCE-macos-arm64.dmg`, Windows is
+The current release is build 77. Mac is `MeshCE-macos-arm64.dmg`, Windows is
 `halo-windows-release.zip`, and Linux is `halo-linux-release.zip`, on this
-repository's [releases page](https://github.com/bitmoda/MeshCE/releases/tag/build-76).
+repository's [releases page](https://github.com/bitmoda/MeshCE/releases/tag/build-77).
 A testing release, when one is published, is a `testing-N` prerelease on that
 same page and uses the same disk image name.
 
