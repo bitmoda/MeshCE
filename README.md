@@ -12,9 +12,9 @@
   </tr>
 </table>
 <p align="center">
-  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-77/MeshCE-macos-arm64.dmg"><img src="https://img.shields.io/badge/Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download MeshCE for Mac"></a>
-  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-77/halo-windows-release.zip"><img src="https://img.shields.io/badge/Windows-download-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download MeshCE for Windows"></a>
-  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-77/halo-linux-release.zip"><img src="https://img.shields.io/badge/Linux-download-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download MeshCE for Linux"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-78/MeshCE-macos-arm64.dmg"><img src="https://img.shields.io/badge/Mac-download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download MeshCE for Mac"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-78/halo-windows-release.zip"><img src="https://img.shields.io/badge/Windows-download-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download MeshCE for Windows"></a>
+  <a href="https://github.com/bitmoda/MeshCE/releases/download/build-78/halo-linux-release.zip"><img src="https://img.shields.io/badge/Linux-download-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download MeshCE for Linux"></a>
 </p>
 
 <p align="center">
@@ -48,7 +48,7 @@ You can also play with up to 128 players, run campaign co-op online, and host a 
 
 ## Download
 
-The Mac button downloads build 77 (`MeshCE-macos-arm64.dmg`). The Windows button downloads build 77 (`halo-windows-release.zip`). The Linux button downloads build 77 (`halo-linux-release.zip`). Each system is published on its own. Those three are on the [releases page](https://github.com/bitmoda/MeshCE/releases).
+The Mac button downloads build 78 (`MeshCE-macos-arm64.dmg`). The Windows button downloads build 78 (`halo-windows-release.zip`). The Linux button downloads build 78 (`halo-linux-release.zip`). Each system is published on its own. Those three are on the [releases page](https://github.com/bitmoda/MeshCE/releases).
 
 | System | Download this | Then |
 | --- | --- | --- |

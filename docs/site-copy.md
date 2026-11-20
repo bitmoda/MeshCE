@@ -22,17 +22,17 @@ On your computer
 
 Windows and Linux draw with OpenGL. Mac draws with Metal. Sound, input, and gamepads go through SDL3.
 
-On Mac, build 77 checks for a newer release and asks before installing it. A Mac on build 76 offers build 77. On Windows and Linux, a newer download replaces the program and leaves maps, saves, and settings in place.
+On Mac, build 78 checks for a newer release and asks before installing it. A Mac on build 76 or build 77 offers build 78. On Windows and Linux, a newer download replaces the program and leaves maps, saves, and settings in place.
 
 Downloads
 
-Mac, build 77: https://github.com/bitmoda/MeshCE/releases/download/build-77/MeshCE-macos-arm64.dmg
+Mac, build 78: https://github.com/bitmoda/MeshCE/releases/download/build-78/MeshCE-macos-arm64.dmg
 Open the disk image and drag MeshCE into Applications. Apple Silicon, macOS 26 or later.
 
-Windows, build 77: https://github.com/bitmoda/MeshCE/releases/download/build-77/halo-windows-release.zip
+Windows, build 78: https://github.com/bitmoda/MeshCE/releases/download/build-78/halo-windows-release.zip
 Unzip it and run halo.exe.
 
-Linux, build 77: https://github.com/bitmoda/MeshCE/releases/download/build-77/halo-linux-release.zip
+Linux, build 78: https://github.com/bitmoda/MeshCE/releases/download/build-78/halo-linux-release.zip
 Unzip it and run halo.
 
 The site is https://bit.moda/meshce. Discord is https://discord.gg/jbHsRSGtd3.
