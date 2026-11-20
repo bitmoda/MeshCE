@@ -39,13 +39,15 @@ doubles the wait, up to 7 days. During the wait the key is not matched.
 After it, the key is matched only when the search is otherwise short, and
 it does not host while anyone else can.
 
-Ranks live in a list every client keeps. A rank changes when more than half
-of the installs named on a scoreboard submit that same text. A client that
-never sends does not hold the others up, and that match does not change the
-missing client's rank. A shorter scoreboard does not stay once a longer one
-reaches that count: the rank change from the shorter one is taken back. A
-client whose scoreboard differs is banned. A client that already sent a
-longer scoreboard is not.
+Ranks live in a list every client keeps. A rank changes when this client
+played that match and more than half of the installs it saw submit the same
+text. A scoreboard that names anyone this client did not see does not count,
+and a client that was not in the match does not change rank or start a
+cooldown from it. A client that never sends does not hold the others up, and
+that match does not change the missing client's rank. A shorter scoreboard
+does not stay once a longer one reaches that count: the rank change from the
+shorter one is taken back. A client whose scoreboard differs is banned. A
+client that already sent a longer scoreboard is not.
 */
 
 #include "platform.h"
@@ -140,6 +142,8 @@ enum
 	MESH_MACHINES = 128,
 	MESH_STANDINGS = 128,
 	MESH_POLLS = 4,
+	/* Matches this client played and can still apply a scoreboard for. */
+	MESH_WITNESSED = 4,
 	MESH_VOTES = 16,
 	MESH_TALLY_TEXT = PEER_MESH_TALLY_TEXT,
 	/* A scoreboard past one packet is sent in pieces of this many bytes. */
@@ -264,6 +268,15 @@ struct mesh_poll
 	int relays;
 	unsigned quiet_at;
 	int used;
+};
+
+/* Installs this client saw when it sent its own scoreboard for a match. */
+struct mesh_witness
+{
+	int used;
+	char match_id[40];
+	unsigned char keys[MESH_VOTES][32];
+	int key_count;
 };
 
 struct mesh_report
@@ -396,6 +409,8 @@ static struct
 	unsigned host_note_at;
 	struct mesh_standing standings[MESH_STANDINGS];
 	struct mesh_poll polls[MESH_POLLS];
+	struct mesh_witness witness[MESH_WITNESSED];
+	int witness_next;
 	unsigned last_tally;
 	int standings_ready;
 	int sync_have;
@@ -926,6 +941,7 @@ static void load_identity(void)
 
 static int book_played(const unsigned char *key);
 static int match_text_is(const char *text, const unsigned char id[16]);
+static int strike_voter_allowed(const unsigned char *voter, const unsigned char match[16]);
 static int book_level(const unsigned char *key);
 static int invites_young(unsigned now);
 
@@ -2236,6 +2252,9 @@ static int strike_add(const unsigned char *voter, const unsigned char *target, c
 
 	if (!voter || !target || !match || !signature || same_key(voter, target))
 		return 0;
+	/* An install this client did not see in the match cannot fill the list. */
+	if (!strike_voter_allowed(voter, match))
+		return 0;
 	for (index = 0; index < MESH_STRIKES; index++)
 	{
 		struct mesh_strike *strike = &mesh.strikes[index];
@@ -2775,6 +2794,153 @@ static void note_sync_ours(void)
 	}
 }
 
+static int witness_slot(const char *match_id)
+{
+	int index;
+
+	if (!match_id || !match_id[0])
+		return -1;
+	for (index = 0; index < MESH_WITNESSED; index++)
+	{
+		if (mesh.witness[index].used && !strcmp(mesh.witness[index].match_id, match_id))
+			return index;
+	}
+	return -1;
+}
+
+static int witness_has_key(int slot, const unsigned char key[32])
+{
+	int index;
+
+	if (slot < 0 || slot >= MESH_WITNESSED || !key)
+		return 0;
+	for (index = 0; index < mesh.witness[slot].key_count && index < MESH_VOTES; index++)
+	{
+		if (same_key(mesh.witness[slot].keys[index], key))
+			return 1;
+	}
+	return 0;
+}
+
+/* This install, the host, or a machine that sent its key in this game. */
+static int player_seen(const unsigned char *key)
+{
+	int index;
+
+	if (!key || !mesh.have_key)
+		return 0;
+	if (same_key(key, mesh.public_key))
+		return 1;
+	if (mesh.host_have && same_key(key, mesh.host_key))
+		return 1;
+	for (index = 0; index < MESH_MACHINES; index++)
+	{
+		if (mesh.machine_have[index] && same_key(mesh.machine_key[index], key))
+			return 1;
+	}
+	return 0;
+}
+
+/* A kick from an install this client has seen in this game, or on the
+scoreboard it already sent for this match. Anyone else is left out. */
+static int strike_voter_allowed(const unsigned char *voter, const unsigned char match[16])
+{
+	char hex[40];
+	int index;
+
+	if (player_seen(voter))
+		return 1;
+	if (!match)
+		return 0;
+	for (index = 0; index < 16; index++)
+		snprintf(hex + index * 2, 3, "%02x", match[index]);
+	return witness_has_key(witness_slot(hex), voter);
+}
+
+/* 1 when this client is in the match, or it already sent a scoreboard for it. */
+static int match_id_open(const char *match_id)
+{
+	if (!match_id || !match_id[0])
+		return 0;
+	if (witness_slot(match_id) >= 0)
+		return 1;
+	return mesh.have_match && match_text_is(match_id, mesh.match_id);
+}
+
+static int match_bytes_open(const unsigned char id[16])
+{
+	char hex[40];
+	int index;
+
+	if (!id)
+		return 0;
+	for (index = 0; index < 16; index++)
+		snprintf(hex + index * 2, 3, "%02x", id[index]);
+	return match_id_open(hex);
+}
+
+/* The installs on the scoreboard this client is sending. A later scoreboard
+counts only against this list. A one-install list cannot reach a majority. */
+static void witness_remember(const char *match_id, const char *tally)
+{
+	unsigned char keys[MESH_VOTES][32];
+	char expect[48];
+	int count;
+	int index;
+	int slot;
+
+	if (!match_id || !match_id[0] || !tally || !mesh.have_key)
+		return;
+	snprintf(expect, sizeof(expect), "v1|%s|", match_id);
+	if (strncmp(tally, expect, strlen(expect)) != 0)
+		return;
+	count = mesh_tally_key_count(tally);
+	if (count < 2 || count > MESH_VOTES || !mesh_tally_has_key(tally, mesh.public_key))
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (!mesh_tally_key_at(tally, index, keys[index]))
+			return;
+	}
+	slot = witness_slot(match_id);
+	if (slot >= 0)
+	{
+		int kept;
+
+		if (count <= mesh.witness[slot].key_count)
+			return;
+		for (kept = 0; kept < mesh.witness[slot].key_count; kept++)
+		{
+			if (!mesh_tally_has_key(tally, mesh.witness[slot].keys[kept]))
+				return;
+		}
+	}
+	else
+	{
+		for (index = 0; index < MESH_WITNESSED; index++)
+		{
+			if (!mesh.witness[index].used)
+			{
+				slot = index;
+				break;
+			}
+		}
+		if (slot < 0)
+		{
+			slot = mesh.witness_next % MESH_WITNESSED;
+			if (slot < 0)
+				slot = 0;
+			mesh.witness_next++;
+		}
+	}
+	memset(&mesh.witness[slot], 0, sizeof(mesh.witness[slot]));
+	mesh.witness[slot].used = 1;
+	snprintf(mesh.witness[slot].match_id, sizeof(mesh.witness[slot].match_id), "%s", match_id);
+	for (index = 0; index < count; index++)
+		memcpy(mesh.witness[slot].keys[index], keys[index], 32);
+	mesh.witness[slot].key_count = count;
+}
+
 static struct mesh_poll *poll_for(const char *match_id, int create)
 {
 	int index;
@@ -2796,11 +2962,77 @@ static struct mesh_poll *poll_for(const char *match_id, int create)
 	if (!create)
 		return NULL;
 	if (free_slot < 0)
-		free_slot = 0;
+	{
+		for (index = 0; index < MESH_POLLS; index++)
+		{
+			if (mesh.polls[index].used && !match_id_open(mesh.polls[index].match_id))
+			{
+				free_slot = index;
+				break;
+			}
+		}
+	}
+	/* The match being stored needs a slot. Forget the oldest match this
+	client has finished, and reuse the poll that was counting it. */
+	if (free_slot < 0)
+	{
+		int oldest = -1;
+
+		for (index = 0; index < MESH_WITNESSED; index++)
+		{
+			int at = mesh.witness_next + index;
+
+			if (at < 0)
+				at = 0;
+			at %= MESH_WITNESSED;
+			if (!mesh.witness[at].used || !strcmp(mesh.witness[at].match_id, match_id))
+				continue;
+			if (mesh.have_match && match_text_is(mesh.witness[at].match_id, mesh.match_id))
+				continue;
+			oldest = at;
+			break;
+		}
+		if (oldest >= 0)
+		{
+			for (index = 0; index < MESH_POLLS; index++)
+			{
+				if (mesh.polls[index].used &&
+					!strcmp(mesh.polls[index].match_id, mesh.witness[oldest].match_id))
+				{
+					free_slot = index;
+					break;
+				}
+			}
+			mesh.witness[oldest].used = 0;
+			mesh.witness_next = (oldest + 1) % MESH_WITNESSED;
+		}
+	}
+	if (free_slot < 0)
+		return NULL;
 	memset(&mesh.polls[free_slot], 0, sizeof(mesh.polls[free_slot]));
 	snprintf(mesh.polls[free_slot].match_id, sizeof(mesh.polls[free_slot].match_id), "%s", match_id);
 	mesh.polls[free_slot].used = 1;
 	return &mesh.polls[free_slot];
+}
+
+/* Scoreboards that arrived before this client sent its own, from installs
+that were not in the match, do not keep a slot. */
+static void witness_drop_outsiders(const char *match_id)
+{
+	struct mesh_poll *poll;
+	int slot;
+	int index;
+
+	slot = witness_slot(match_id);
+	poll = poll_for(match_id, 0);
+	if (slot < 0 || !poll)
+		return;
+	for (index = 0; index < MESH_VOTES; index++)
+	{
+		if (!poll->votes[index].used || witness_has_key(slot, poll->votes[index].key))
+			continue;
+		memset(&poll->votes[index], 0, sizeof(poll->votes[index]));
+	}
 }
 
 static int roster_add(unsigned char keys[][32], int count, int cap, const unsigned char *key)
@@ -2997,16 +3229,24 @@ static void tally_decide(struct mesh_poll *poll)
 	int index;
 	int tie = 0;
 	int newly = 0;
+	int slot;
+	int roster;
 	unsigned now;
 	unsigned char match_bytes[16];
 
+	/* A scoreboard for a match this client did not play does not change rank. */
+	slot = witness_slot(poll->match_id);
+	if (slot < 0)
+		return;
+	roster = mesh.witness[slot].key_count;
 	/* Give the rest of the match a moment to arrive before a tally is kept. */
 	now = GetTickCount();
 	if (!poll->quiet_at || now - poll->quiet_at < 3000)
 		return;
-	/* The largest roster with more than half agreeing is the match. A client
-	that never sends does not hold that up. A shorter tally waits while a
-	fuller one is present. */
+	/* The largest roster with more than half of the installs this client saw
+	agreeing is the match. A client that never sends does not hold that up.
+	A shorter tally waits while a fuller one is present. Two installs cannot
+	settle the match by leaving the others off the list. */
 	for (index = 0; index < MESH_VOTES; index++)
 	{
 		int listed;
@@ -3014,9 +3254,11 @@ static void tally_decide(struct mesh_poll *poll)
 
 		if (!poll->votes[index].used || tally_blocked(poll, poll->votes[index].text))
 			continue;
-		listed = mesh_tally_key_count(poll->votes[index].text);
 		votes = tally_supporters(poll, poll->votes[index].text);
-		if (!mesh_tally_majority(votes, listed) || listed <= best_keys)
+		if (!mesh_tally_roster_keeps(poll->votes[index].text, mesh.witness[slot].keys, roster, votes))
+			continue;
+		listed = mesh_tally_key_count(poll->votes[index].text);
+		if (listed <= best_keys)
 			continue;
 		best_keys = listed;
 	}
@@ -3033,7 +3275,7 @@ static void tally_decide(struct mesh_poll *poll)
 		if (listed != best_keys || tally_blocked(poll, text))
 			continue;
 		votes = tally_supporters(poll, text);
-		if (!mesh_tally_majority(votes, listed))
+		if (!mesh_tally_roster_keeps(text, mesh.witness[slot].keys, roster, votes))
 			continue;
 		if (!best)
 			best = text;
@@ -3136,6 +3378,17 @@ static void tally_store(const unsigned char *key, const char *match_id, const ch
 	snprintf(expect, sizeof(expect), "v1|%s|", match_id);
 	if (strncmp(text, expect, strlen(expect)) != 0)
 		return;
+	/* Someone else's invented match is not stored, and it is not passed on.
+	Once this client has sent its scoreboard, an install it did not see
+	cannot take a slot from the players who did. */
+	if (!match_id_open(match_id))
+		return;
+	{
+		int seen = witness_slot(match_id);
+
+		if (seen >= 0 && !witness_has_key(seen, key))
+			return;
+	}
 	poll = poll_for(match_id, 1);
 	if (!poll)
 		return;
@@ -3304,8 +3557,14 @@ static void tally_take_part(const unsigned char *key, const unsigned char *packe
 		return;
 	memset(match_id, 0, sizeof(match_id));
 	memcpy(match_id, body + 32, 39);
-	if (!match_id[0])
+	if (!match_id[0] || !match_id_open(match_id))
 		return;
+	{
+		int seen = witness_slot(match_id);
+
+		if (seen >= 0 && !witness_has_key(seen, key))
+			return;
+	}
 	memset(name, 0, sizeof(name));
 	memcpy(name, body + 72, 11);
 	for (index = 0; index < MESH_TALLY_GATHER; index++)
@@ -3324,8 +3583,9 @@ static void tally_take_part(const unsigned char *key, const unsigned char *packe
 	}
 	if (!slot)
 	{
+		/* A full table keeps the pieces it already has. */
 		if (free_slot < 0)
-			free_slot = 0;
+			return;
 		slot = &tally_gather[free_slot];
 		memset(slot, 0, sizeof(*slot));
 		slot->used = 1;
@@ -3450,13 +3710,20 @@ static void report_settle(const unsigned char *target, const unsigned char *matc
 	poll = committed_poll(match);
 	if (!poll)
 		return;
+	/* The half is the installs this client saw, not a shorter list in the tally. */
+	{
+		int slot = witness_slot(poll->match_id);
+
+		if (slot < 0 || !witness_has_key(slot, target))
+			return;
+		listed = mesh.witness[slot].key_count;
+	}
 	left = mesh_tally_key_left(poll->decided, target);
 	quit = mesh_tally_key_quit(poll->decided, target);
 	if (!quit)
 		strike_leave_drop_open(target, match);
 	if (!tally_signed(poll, target) && !left)
 		return;
-	listed = mesh_tally_key_count(poll->decided);
 	for (index = 0; index < MESH_STRIKES; index++)
 	{
 		struct mesh_strike *strike = &mesh.strikes[index];
@@ -3598,6 +3865,9 @@ static int handle_report(const unsigned char *payload, int payload_len)
 	votes = payload[81];
 	host = payload + 82;
 	if (votes < 1 || votes > 8 || payload_len < 114 + votes * 96)
+		return 0;
+	/* A report for a match this client is not in does not start a cooldown. */
+	if (!match_bytes_open(match))
 		return 0;
 	publisher_is_host = same_key(payload, host);
 	report_message(message, target, match, host);
@@ -5499,6 +5769,10 @@ int peer_mesh_submit_tally(const char *match_id, const char *name, const char *t
 		pthread_mutex_unlock(&mesh_lock);
 		return 0;
 	}
+	/* This list is who played. Another scoreboard counts against it, and a
+	match this client did not send a scoreboard for does not change rank. */
+	witness_remember(match_id, tally);
+	witness_drop_outsiders(match_id);
 	for (index = 0; index < count; index++)
 	{
 		int offset = index * MESH_TALLY_CHUNK;

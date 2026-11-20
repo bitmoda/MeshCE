@@ -125,6 +125,11 @@ int mesh_tally_key_quit(const char *text, const unsigned char key[32]);
 /* 1 when this many matching tallies is more than half of the match. */
 int mesh_tally_majority(int votes, int humans);
 
+/* 1 when this tally can change rank for a match this client saw.
+Every install it names is in roster, and votes is more than half of that
+roster. The number of installs the tally itself names is not the half. */
+int mesh_tally_roster_keeps(const char *text, const unsigned char roster[][32], int roster_count, int votes);
+
 /* one install's record on the mesh. the key is the Ed25519 id. */
 struct mesh_standing
 {

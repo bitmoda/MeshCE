@@ -398,6 +398,26 @@ int main(void)
 		check(mesh_tally_majority(5, 8) == 1, "five of eight agree");
 		check(mesh_tally_majority(8, 16) == 0, "eight of sixteen do not agree");
 		check(mesh_tally_majority(9, 16) == 1, "nine of sixteen agree");
+		{
+			unsigned char roster[4][32];
+			unsigned char strangers[2][32];
+
+			memcpy(roster[0], alpha, 32);
+			memcpy(roster[1], beta, 32);
+			memset(roster[2], 6, 32);
+			memset(roster[3], 7, 32);
+			memcpy(strangers[0], gamma, 32);
+			memset(strangers[1], 8, 32);
+			check(mesh_tally_roster_keeps(left, roster, 2, 2) == 1,
+				"both installs of a two player match agree");
+			check(mesh_tally_roster_keeps(left, roster, 4, 2) == 0,
+				"two installs do not settle a four player match");
+			check(mesh_tally_roster_keeps(left, roster, 2, 1) == 0,
+				"one signature does not settle the match this client saw");
+			check(mesh_tally_roster_keeps(left, strangers, 2, 2) == 0,
+				"a tally that names someone else is not this match");
+			check(mesh_tally_roster_keeps(NULL, roster, 2, 2) == 0, "a missing tally is not kept");
+		}
 		memset(book, 0, sizeof(book));
 		memset(claims, 0, sizeof(claims));
 		memcpy(claims[0].key, alpha, 32);

@@ -913,6 +913,38 @@ int mesh_tally_key_at(const char *text, int index, unsigned char key[32])
 	return 0;
 }
 
+int mesh_tally_roster_keeps(const char *text, const unsigned char roster[][32], int roster_count, int votes)
+{
+	int count;
+	int index;
+
+	if (!text || !roster || roster_count < 2 || roster_count > 16)
+		return 0;
+	count = mesh_tally_key_count(text);
+	if (count < 1)
+		return 0;
+	for (index = 0; index < count; index++)
+	{
+		unsigned char key[32];
+		int at;
+		int found = 0;
+
+		if (!mesh_tally_key_at(text, index, key))
+			return 0;
+		for (at = 0; at < roster_count; at++)
+		{
+			if (!memcmp(roster[at], key, 32))
+			{
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
+			return 0;
+	}
+	return mesh_tally_majority(votes, roster_count);
+}
+
 int mesh_tally_key_name(const char *text, const unsigned char key[32], char name[12])
 {
 	const char *line;
