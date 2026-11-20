@@ -243,8 +243,12 @@ int main(void)
 		check(mesh_seats_unfilled(8, 8, 8) == 0, "eight players fill eight seats");
 		check(mesh_seats_unfilled(2, 8, 2) == 0, "a short social search is not that wait");
 		check(!strcmp(mesh_map_for((const unsigned char *)"\x00", "ffa"), "hangemhigh"), "the first map is hangemhigh");
+		check(!strcmp(mesh_map_for((const unsigned char *)"\x06", "ffa"), "damnation"), "free for all includes damnation");
 		check(!strcmp(mesh_map_for((const unsigned char *)"\x0c", "ffa"), "longest"), "free for all uses every stock map");
-		check(!strcmp(mesh_map_for((const unsigned char *)"\x05", "ranked"), "hangemhigh"), "ranked stays on the five smaller maps");
+		check(!strcmp(mesh_map_for((const unsigned char *)"\x00", "ranked"), "hangemhigh"), "ranked starts on hangemhigh");
+		check(!strcmp(mesh_map_for((const unsigned char *)"\x05", "ranked"), "damnation"), "ranked includes damnation");
+		check(!strcmp(mesh_map_for((const unsigned char *)"\x05", "hardcore"), "damnation"), "2v2 includes damnation");
+		check(!strcmp(mesh_map_for((const unsigned char *)"\x06", "hardcore"), "hangemhigh"), "2v2 rotates six maps");
 		check(mesh_score("hardcore") == 25, "hardcore is to 25");
 		check(mesh_score("ranked") == 25, "ranked is to 25");
 		games = 0;

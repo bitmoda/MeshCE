@@ -2,7 +2,7 @@
 
 MeshCE matchmaking runs on the clients. There is no matchmaking server and no server browser. Each client listens for other clients, keeps a list of the ones it has met, and uses that list to fill a game. The client with the best connection hosts. The others join the invite that host already makes for a party.
 
-The network version of this client is 42. Mac, Windows, and Linux speak the same packets. A client of another version does not join, and it drops these mesh packets.
+The network version of this client is 43. Mac, Windows, and Linux speak the same packets. A client of another version does not join, and it drops these mesh packets.
 
 ## Where the files and ports live
 
@@ -118,7 +118,7 @@ Each machine advertises how many local players it has, from 1 to 4. Ranked seats
 
 The playlist id on the wire is the word the search compares. The name on screen is what the player sees. 2v2 is the on screen name of the playlist whose id is `hardcore`. That id is how clients recognize the same search. It is separate from the Hardcore custom game screen, which is its own set of server options and is not this playlist.
 
-All three are slayer. Everyone spawns with an assault rifle and a pistol, except some Free for all matches. Respawn is 5 seconds. The motion sensor is off, and the radar shows no players. There is no death bonus and no kill penalty. The map comes from the first byte of the match id, so every client in that match loads the same one. Free for all uses every stock multiplayer map: Hang 'Em High, Prisoner, Battle Creek, Derelict, Chill Out, Sidewinder, Damnation, Rat Race, Boarding Action, Blood Gulch, Wizard, Chiron TL34, and Longest. 2v2 and Ranked use the first five of those.
+All three are slayer. Everyone spawns with an assault rifle and a pistol, except some Free for all matches. Respawn is 5 seconds. The motion sensor is off, and the radar shows no players. There is no death bonus and no kill penalty. The map comes from the first byte of the match id, so every client in that match loads the same one. Free for all uses every stock multiplayer map: Hang 'Em High, Prisoner, Battle Creek, Derelict, Chill Out, Sidewinder, Damnation, Rat Race, Boarding Action, Blood Gulch, Wizard, Chiron TL34, and Longest. 2v2 and Ranked use Hang 'Em High, Prisoner, Battle Creek, Derelict, Chill Out, and Damnation.
 
 | On screen | Wire id | Players | Game | Score | Port |
 | --- | --- | --- | --- | --- | --- |

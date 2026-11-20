@@ -58,8 +58,8 @@ not in the lobby yet. a shorter search is not this wait. */
 int mesh_seats_unfilled(int advertised, int cap, int present);
 
 /* the map this match id uses. the same id is the same map on every client.
-free for all draws from every stock multiplayer map. the other playlists
-draw from the five smaller ones. */
+free for all draws from every stock multiplayer map. 2v2 and ranked draw
+from hangemhigh, prisoner, beavercreek, carousel, chillout, and damnation. */
 const char *mesh_map_for(const unsigned char match[16], const char *playlist);
 
 /* slayer score: 25 on 2v2 and ranked, 50 on free for all. */

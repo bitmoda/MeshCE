@@ -362,7 +362,9 @@ int mesh_seats_unfilled(int advertised, int cap, int present)
 
 const char *mesh_map_for(const unsigned char match[16], const char *playlist)
 {
-	static const char *const arena[] = { "hangemhigh", "prisoner", "beavercreek", "carousel", "chillout" };
+	static const char *const arena[] = {
+		"hangemhigh", "prisoner", "beavercreek", "carousel", "chillout", "damnation"
+	};
 	static const char *const ffa[] = {
 		"hangemhigh", "prisoner", "beavercreek", "carousel", "chillout",
 		"sidewinder", "damnation", "ratrace", "boardingaction", "bloodgulch",

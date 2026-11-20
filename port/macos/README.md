@@ -35,7 +35,7 @@ SDK, or build tools are needed to run the downloaded app.
 On first launch, select your own original Xbox Halo disc image or extracted
 game folder. The download contains no maps or disc images.
 
-Players in one game need network protocol 42. A client does not join a host of
+Players in one game need network protocol 43. A client does not join a host of
 another protocol.
 
 ## Launch
@@ -158,7 +158,7 @@ MeshCE icon, and an invite in Discord. A person who asks to join is let in.
 Enable activity sharing in Discord to make it visible. The installed app handles
 both `halo://` links and the Discord application's launch scheme, so an invite
 can start MeshCE when it is closed. Ordinary campaign/client gameplay does not publish activity.
-This tree uses network protocol 42. Players need matching builds. Command-W is
+This tree uses network protocol 43. Players need matching builds. Command-W is
 ignored while playing, and Command-Q or the window's close button quits.
 
 ## Build

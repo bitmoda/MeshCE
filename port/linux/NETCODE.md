@@ -249,8 +249,10 @@ dedicated server's map vote). This build's match start, split screen, and
 blasts are messages 96 through 101. A host that never sends the match start
 is joined once its clock is moving. Version 42 is the peer mesh and Find
 Game. Messages 102 through 106 are a vehicle ejection, the host's mods
-policy and its answer, a machine's peer id, and a signed kick report. A
-machine of another version does not join.
+policy and its answer, a machine's peer id, and a signed kick report.
+Version 43 keeps those messages. 2v2 and Ranked include Damnation, so the
+map taken from the match id differs from version 42. A machine of another
+version does not join.
 
 This Mac build plays that options record (time limit, loadout, friendly fire,
 vehicle respawn, team balance, radar, vehicle sets, and no-map-weapons) and
